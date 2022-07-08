@@ -1,6 +1,7 @@
 #![no_main]
 #![no_std]
 #![feature(alloc_error_handler)]
+#![feature(const_mut_refs)]
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -14,6 +15,7 @@ pub mod utils;
 pub mod virtio;
 
 mod apps;
+mod allocator;
 
 use virtio::VirtIORegs;
 
@@ -63,7 +65,9 @@ fn interrupt_for_node(node: &device_tree::Node) -> Option<u32> {
 }
 
 #[global_allocator]
-static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
+static ALLOCATOR: mutex::Mutex<allocator::FixedBlockAllocator> =
+    mutex::Mutex::new(allocator::FixedBlockAllocator::new());
+// static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
 #[no_mangle]
 pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
@@ -187,9 +191,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         apps::shell::main(&UART, &mut shell);
     });
 
-    UART.lock()
-        .as_mut()
-        .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
+    UART.map(|uart| uart.write_bytes(b"Booting Allora...\n"));
 
     thread::spawn(|| {
         UART.map(|uart| {
