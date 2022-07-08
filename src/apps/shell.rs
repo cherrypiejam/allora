@@ -138,6 +138,7 @@ pub fn main(uart: &Mutex<Option<UART>>, app: &mut Shell) {
     loop {
         uart.map(|u| u.write_bytes(b"$> "));
         let mut buf = [0; 1024];
+        // FIXME this blocks other uart writes
         let line = uart.map(|u| u.read_line(&mut buf, true)).unwrap_or(b"");
         if app.do_line(line, |output| {
             uart.map(|u| u.write_bytes(output));

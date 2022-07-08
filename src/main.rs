@@ -179,6 +179,8 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         }
     }
 
+    UART.map(|uart| uart.write_bytes(b"Booting Allora...\n"));
+
     thread::spawn(|| {
         UART.map(|uart| {
             let _ = write!(uart, "Running from core {}\n", utils::current_core());
@@ -190,8 +192,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         };
         apps::shell::main(&UART, &mut shell);
     });
-
-    UART.map(|uart| uart.write_bytes(b"Booting Allora...\n"));
 
     thread::spawn(|| {
         UART.map(|uart| {

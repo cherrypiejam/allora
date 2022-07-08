@@ -83,8 +83,9 @@ unsafe impl GlobalAlloc for mutex::Mutex<FixedBlockAllocator> {
                 let node = ListNode {
                     next: allocator.list_heads[index].take(),
                 };
-                ptr::write(ptr as *mut ListNode, node);
-                allocator.list_heads[index] = Some(&mut *(ptr as *mut ListNode));
+                let node_ptr = ptr as *mut ListNode;
+                ptr::write(node_ptr, node);
+                allocator.list_heads[index] = Some(&mut *(node_ptr));
             }
             None => {
                 let ptr = NonNull::new(ptr).expect("dealloc a null pointer!");
