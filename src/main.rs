@@ -134,6 +134,15 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                 });
         }
 
+
+        for a in root.children_by_prop("device_type", |prop| prop.value == b"memory\0") {
+            UART.map(move |u| write!{u, "memory:\n{:#?}\n", a});
+        }
+        unsafe {
+            UART.map(move |u| write!{u, "heap_start:\n{:#x}\n", &HEAP_START as *const _ as usize});
+            UART.map(move |u| write!{u, "heap_start:\n{:#x}\n", HEAP_START});
+        }
+
         for child in root.children_by_prop("compatible", |prop| prop.value == b"virtio,mmio\0") {
             if let Some(reg) = child.prop_by_name("reg") {
                 let (addr, _rest) = regs_to_usize(reg.value, address_cell);
@@ -179,6 +188,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         }
     }
 
+
     // UART.map(|uart| uart.write_bytes(b"Booting Allora...\n"));
 
     // thread::spawn(|| {
@@ -195,39 +205,18 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
 
     UART.map(|uart| write!(uart, "Booting Allora...{}\n", utils::current_core()));
 
-        // thread::spawnf(|| {
+    // // Debug
+    // for i in 0..10 {
+        // let a = i;
+        // thread::spawn(move || {
             // UART.map(|uart| {
-                // let _ = write!(uart, "{} Running from core {}\n", 111, utils::current_core());
+                // let _ = write!(uart, "{} Running from core {}\n", a, utils::current_core());
             // });
-            // // loop { unsafe { asm!("wfi"); } }
-        // }, &UART);
-
-        // thread::spawnf(|| {
-            // UART.map(|uart| {
-                // let _ = write!(uart, "{} Running from core {}\n", 222, utils::current_core());
-            // });
-            // // loop { unsafe { asm!("wfi"); } }
-        // }, &UART);
-
-
-        // thread::spawnf(|| {
-            // UART.map(|uart| {
-                // let _ = write!(uart, "{} Running from core {}\n", 333, utils::current_core());
-            // });
-            // // loop { unsafe { asm!("wfi"); } }
-        // }, &UART);
-
-    for i in 0..10 {
-        let a = i;
-        thread::spawnf(move || {
-            UART.map(|uart| {
-                let _ = write!(uart, "{} Running from core {}\n", a, utils::current_core());
-            });
-            for j in 0..100000 {
-                let _a = j + 30;
-            }
-        }, &UART, i);
-    }
+            // for j in 0..100000 {
+                // let _a = j + 30;
+            // }
+        // });
+    // }
 
     // thread::spawn(|| {
         // UART.map(|uart| {

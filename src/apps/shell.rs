@@ -12,8 +12,8 @@ pub struct Shell<'a, 'b> {
 impl<'a, 'b> Shell<'a, 'b> {
     fn get_random<F: FnMut(&[u8])>(&mut self, mut f: F) {
         let mut data: [u8; 16] = [0; 16];
-        self.entropy.map(|e| e.readf(&mut data, &mut f));
-        // self.entropy.map(|e| e.read(&mut data));
+        self.entropy.map(|e| e.read(&mut data));
+        // self.entropy.map(|e| e.readf(&mut data, &mut f));
         f(b"Random: ");
         f(&data);
     }
