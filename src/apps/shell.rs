@@ -12,7 +12,8 @@ pub struct Shell<'a, 'b> {
 impl<'a, 'b> Shell<'a, 'b> {
     fn get_random<F: FnMut(&[u8])>(&mut self, mut f: F) {
         let mut data: [u8; 16] = [0; 16];
-        self.entropy.map(|e| e.read(&mut data));
+        self.entropy.map(|e| e.readf(&mut data, &mut f));
+        // self.entropy.map(|e| e.read(&mut data));
         f(b"Random: ");
         f(&data);
     }
@@ -138,7 +139,6 @@ pub fn main(uart: &Mutex<Option<UART>>, app: &mut Shell) {
     loop {
         uart.map(|u| u.write_bytes(b"$> "));
         let mut buf = [0; 1024];
-        // FIXME this blocks other uart writes
         let line = uart.map(|u| u.read_line(&mut buf, true)).unwrap_or(b"");
         if app.do_line(line, |output| {
             uart.map(|u| u.write_bytes(output));

@@ -101,4 +101,52 @@ impl<'a> VirtIOEntropy<'a> {
             self.irq.disable();
         }
     }
+
+    pub fn readf<F>(&mut self, data: &mut [u8], f: &mut F)
+    where
+        F: FnMut(&[u8]),
+    {
+        unsafe {
+            write_volatile(
+                &mut self.queue.descriptors[0],
+                VirtQDesc {
+                    addr: (data.as_ptr() as *const _ as u64).into(),
+                    len: (data.len() as u32).into(),
+                    flags: (2).into(),
+                    next: 0.into(),
+                },
+            );
+
+            write_volatile(
+                &mut self.queue.available.ring[self.queue.available.idx.native() as usize],
+                0.into(),
+            );
+            mb();
+            write_volatile(
+                &mut self.queue.available.idx,
+                (self.queue.available.idx.native() + 1).into(),
+            );
+            mb();
+            write_volatile(&mut self.regs.queue_notify, 0.into());
+            mb();
+            f(b"before irq enable\n");
+            self.irq.enable();
+            // f(b"after irq enable\n");
+            while read_volatile(&self.queue.used.idx).native()
+                != read_volatile(&self.queue.available.idx).native()
+            {
+                // use core::arch::asm;
+                // asm!("wfi");
+                let status = read_volatile(&self.regs.interrupt_status);
+                if status.native() != 0 {
+                    write_volatile(&mut self.regs.interrupt_ack, status);
+                    if read_volatile(&self.regs.interrupt_status).native() == status.native() {
+                        panic!("{:#x}", self.regs.interrupt_status.native());
+                    }
+                }
+            }
+            self.irq.disable();
+            f(b"after irq disable\n");
+        }
+    }
 }

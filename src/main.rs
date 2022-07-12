@@ -179,32 +179,68 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         }
     }
 
-    UART.map(|uart| uart.write_bytes(b"Booting Allora...\n"));
+    // UART.map(|uart| uart.write_bytes(b"Booting Allora...\n"));
 
-    thread::spawn(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}\n", utils::current_core());
-        });
+    // thread::spawn(|| {
+        // UART.map(|uart| {
+            // let _ = write!(uart, "Running from core {}\n", utils::current_core());
+        // });
 
-        let mut shell = apps::shell::Shell {
-            blk: &BLK,
-            entropy: &ENTROPY,
-        };
-        apps::shell::main(&UART, &mut shell);
-    });
+        // let mut shell = apps::shell::Shell {
+            // blk: &BLK,
+            // entropy: &ENTROPY,
+        // };
+        // apps::shell::main(&UART, &mut shell);
+    // });
 
-    thread::spawn(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}\n", utils::current_core());
-        });
-        NET.map(|mut net| {
-            let mut shell = apps::shell::Shell {
-                blk: &BLK,
-                entropy: &ENTROPY,
-            };
-            apps::net::Net { net: &mut net }.run(&mut shell)
-        });
-    });
+    UART.map(|uart| write!(uart, "Booting Allora...{}\n", utils::current_core()));
+
+        // thread::spawnf(|| {
+            // UART.map(|uart| {
+                // let _ = write!(uart, "{} Running from core {}\n", 111, utils::current_core());
+            // });
+            // // loop { unsafe { asm!("wfi"); } }
+        // }, &UART);
+
+        // thread::spawnf(|| {
+            // UART.map(|uart| {
+                // let _ = write!(uart, "{} Running from core {}\n", 222, utils::current_core());
+            // });
+            // // loop { unsafe { asm!("wfi"); } }
+        // }, &UART);
+
+
+        // thread::spawnf(|| {
+            // UART.map(|uart| {
+                // let _ = write!(uart, "{} Running from core {}\n", 333, utils::current_core());
+            // });
+            // // loop { unsafe { asm!("wfi"); } }
+        // }, &UART);
+
+    for i in 0..10 {
+        let a = i;
+        thread::spawnf(move || {
+            UART.map(|uart| {
+                let _ = write!(uart, "{} Running from core {}\n", a, utils::current_core());
+            });
+            for j in 0..100000 {
+                let _a = j + 30;
+            }
+        }, &UART, i);
+    }
+
+    // thread::spawn(|| {
+        // UART.map(|uart| {
+            // let _ = write!(uart, "Running from core {}\n", utils::current_core());
+        // });
+        // NET.map(|mut net| {
+            // let mut shell = apps::shell::Shell {
+                // blk: &BLK,
+                // entropy: &ENTROPY,
+            // };
+            // apps::net::Net { net: &mut net }.run(&mut shell)
+        // });
+    // });
 
     loop {
         unsafe {
