@@ -135,13 +135,29 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         }
 
 
-        for a in root.children_by_prop("device_type", |prop| prop.value == b"memory\0") {
-            UART.map(move |u| write!{u, "memory:\n{:#?}\n", a});
+        // unsafe {
+            // UART.map(move |u| write!{u, "heap_start:\n{:#x}\n", &HEAP_START as *const _ as usize});
+            // UART.map(move |u| write!{u, "heap_start:\n{:#x}\n", HEAP_START});
+        // }
+
+        // print all
+        for c in root.children() {
+            use alloc::string::String;
+            let name = c.name
+                .iter()
+                .map(|&b| b as char)
+                .collect::<String>();
+            UART.map(move |u| write!{u, "name: {}\n", name});
+            if let Some(t) = c.prop_by_name("device_type") {
+                let name = t.value
+                    .iter()
+                    .map(|&b| b as char)
+                    .collect::<String>();
+                UART.map(move |u| write!{u, "device type: {}\n", name});
+            }
         }
-        unsafe {
-            UART.map(move |u| write!{u, "heap_start:\n{:#x}\n", &HEAP_START as *const _ as usize});
-            UART.map(move |u| write!{u, "heap_start:\n{:#x}\n", HEAP_START});
-        }
+
+
 
         for child in root.children_by_prop("compatible", |prop| prop.value == b"virtio,mmio\0") {
             if let Some(reg) = child.prop_by_name("reg") {
