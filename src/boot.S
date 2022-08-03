@@ -45,7 +45,7 @@ spin:
 .globl cpu_on
 cpu_on:
     mov x3, x1         /* context ID: put into target CPU's x0 */
-    mov x1, x0 
+    mov x1, x0
     ldr x0, =PSCI_0_2_FN64_CPU_ON
     ldr x2, =start_core_1   /* entry point */
     hvc #0
@@ -54,7 +54,7 @@ cpu_on:
 .equ PSCI_CPU_OFF, 0x84000002
 .globl cpu_off
 cpu_off:
-    mov x1, x0 
+    mov x1, x0
     ldr     x0, =PSCI_CPU_OFF
     hvc     #0
 		ret

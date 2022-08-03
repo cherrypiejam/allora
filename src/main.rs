@@ -16,11 +16,14 @@ pub mod virtio;
 
 mod apps;
 mod allocator;
+mod exception;
+mod timer;
 
 use virtio::VirtIORegs;
 
 #[cfg(target_arch = "aarch64")]
 global_asm!(include_str!("boot.S"));
+global_asm!(include_str!("exception.S"));
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
@@ -50,16 +53,66 @@ fn regs_to_usize(regs: &[u8], cell_size: usize) -> (usize, &[u8]) {
     (result, rest)
 }
 
+// FIXME ref DEN0024A_v8_architecture_PG.pdf:139
+// SGI -> 0-15, PPI -> 16-31, SPI -> 32-1020
+fn get_interrupt(irq_type: usize, irq: usize) -> u32 {
+    if irq_type == 0 {
+        // IRQ
+        32 + (irq as u32)
+    } else {
+        // irq_type == 1, SPI
+        16 + (irq as u32)
+    }
+}
+
 fn interrupt_for_node(node: &device_tree::Node) -> Option<u32> {
     node.prop_by_name("interrupts").map(|interrupt| {
         let (irq_type, rest) = regs_to_usize(interrupt.value, 1);
         let (irq, _rest) = regs_to_usize(rest, 1);
+        get_interrupt(irq_type, irq)
+    })
+}
+
+use alloc::vec;
+
+use crate::timer::Timer;
+fn interrupts_for_node(node: &device_tree::Node) -> Option<vec::Vec<u32>> {
+    node.prop_by_name("interrupts").map(|interrupt| {
+        let mut interrupts: vec::Vec<u32> = vec![];
+        let (mut irq_type, rest) = regs_to_usize(interrupt.value, 1);
+        let (mut irq, mut rest) = regs_to_usize(rest, 1);
+        interrupts.push(get_interrupt(irq_type, irq));
+        loop {
+            if rest.len() > 4 { // ignore 0, 0, 15, 4
+                (irq_type, rest) = regs_to_usize(&rest[4..], 1);
+                (irq, rest) = regs_to_usize(rest, 1);
+                interrupts.push(get_interrupt(irq_type, irq));
+            } else {
+                break
+            }
+        }
+        interrupts
+    })
+}
+
+fn interrupt_for_node_nth(node: &device_tree::Node, n: u32) -> Option<u32> {
+    node.prop_by_name("interrupts").and_then(|interrupt| {
+        let (mut irq_type, rest) = regs_to_usize(interrupt.value, 1);
+        let (mut irq, mut rest) = regs_to_usize(rest, 1);
+        for _ in 0..n {
+            if rest.len() > 4 { // ignore 0, 0, 15, 4
+                (irq_type, rest) = regs_to_usize(&rest[4..], 1);
+                (irq, rest) = regs_to_usize(rest, 1);
+            } else {
+                return None
+            }
+        }
         if irq_type == 0 {
             // IRQ
-            32 + (irq as u32)
+            Some(32 + (irq as u32))
         } else {
             // irq_type == 1, SPI
-            16 + (irq as u32)
+            Some(16 + (irq as u32))
         }
     })
 }
@@ -69,11 +122,13 @@ static ALLOCATOR: mutex::Mutex<allocator::FixedBlockAllocator> =
     mutex::Mutex::new(allocator::FixedBlockAllocator::new());
 // static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
+static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
+
 #[no_mangle]
 pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     gic::init();
 
-    static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
+    // static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
     static BLK: mutex::Mutex<Option<virtio::VirtIOBlk>> = mutex::Mutex::new(None);
     static ENTROPY: mutex::Mutex<Option<virtio::VirtIOEntropy>> = mutex::Mutex::new(None);
@@ -134,28 +189,45 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                 });
         }
 
+        exception::load_table();
 
-        // unsafe {
-            // UART.map(move |u| write!{u, "heap_start:\n{:#x}\n", &HEAP_START as *const _ as usize});
-            // UART.map(move |u| write!{u, "heap_start:\n{:#x}\n", HEAP_START});
-        // }
-
-        // print all
-        for c in root.children() {
-            use alloc::string::String;
-            let name = c.name
-                .iter()
-                .map(|&b| b as char)
-                .collect::<String>();
-            UART.map(move |u| write!{u, "name: {}\n", name});
-            if let Some(t) = c.prop_by_name("device_type") {
-                let name = t.value
-                    .iter()
-                    .map(|&b| b as char)
-                    .collect::<String>();
-                UART.map(move |u| write!{u, "device type: {}\n", name});
+        if let Some(timer) = root.child_by_name("timer") {
+            if let Some(irq) = interrupts_for_node(&timer)
+                .map(|irqs| {
+                    irqs.into_iter().find(|&irq| irq == timer::EL1_PHYSICAL_TIMER)
+                })
+                .flatten() {
+                Timer::init(unsafe { gic::GIC::new(irq) });
             }
         }
+
+                // unsafe {
+                    // let mut o: u32;
+                    // asm!("mrs {:x}, CNTFRQ_EL0",
+                         // out(reg) o);
+                    // UART.map(|u| write!(u, "frq: {}\n", o));
+                    // asm!("mrs {:x}, CNTP_TVAL_EL0",
+                         // out(reg) o);
+                    // UART.map(|u| write!(u, "tval: {}\n", o));
+                // }
+                // UART.map(|u| write!(u, "timer interrupt: {}\n", irq));
+
+        // // print all
+        // for c in root.children() {
+            // use alloc::string::String;
+            // let name = c.name
+                // .iter()
+                // .map(|&b| b as char)
+                // .collect::<String>();
+            // UART.map(|u| write!(u, "name: {}\n", name));
+            // if let Some(t) = c.prop_by_name("device_type") {
+                // let name = t.value
+                    // .iter()
+                    // .map(|&b| b as char)
+                    // .collect::<String>();
+                // UART.map(|u| write!(u, "device type: {}\n", name));
+            // }
+        // }
 
 
 
@@ -207,11 +279,23 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
 
     // UART.map(|uart| uart.write_bytes(b"Booting Allora...\n"));
 
+
+    // let a = 0x0 as *mut usize;
+    // for i in 0..1000000000 {
+        // unsafe {
+            // let b = a.add(i);
+            // if *b > 0 {
+                // UART.map(|uart| {
+                    // let _ = write!(uart, "{}: {}\n", b as usize, *b);
+                // });
+            // }
+        // }
+    // }
+
     // thread::spawn(|| {
         // UART.map(|uart| {
             // let _ = write!(uart, "Running from core {}\n", utils::current_core());
         // });
-
         // let mut shell = apps::shell::Shell {
             // blk: &BLK,
             // entropy: &ENTROPY,
