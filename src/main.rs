@@ -74,8 +74,6 @@ fn interrupt_for_node(node: &device_tree::Node) -> Option<u32> {
 }
 
 use alloc::vec;
-
-use crate::timer::Timer;
 fn interrupts_for_node(node: &device_tree::Node) -> Option<vec::Vec<u32>> {
     node.prop_by_name("interrupts").map(|interrupt| {
         let mut interrupts: vec::Vec<u32> = vec![];
@@ -95,27 +93,27 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<vec::Vec<u32>> {
     })
 }
 
-fn interrupt_for_node_nth(node: &device_tree::Node, n: u32) -> Option<u32> {
-    node.prop_by_name("interrupts").and_then(|interrupt| {
-        let (mut irq_type, rest) = regs_to_usize(interrupt.value, 1);
-        let (mut irq, mut rest) = regs_to_usize(rest, 1);
-        for _ in 0..n {
-            if rest.len() > 4 { // ignore 0, 0, 15, 4
-                (irq_type, rest) = regs_to_usize(&rest[4..], 1);
-                (irq, rest) = regs_to_usize(rest, 1);
-            } else {
-                return None
-            }
-        }
-        if irq_type == 0 {
-            // IRQ
-            Some(32 + (irq as u32))
-        } else {
-            // irq_type == 1, SPI
-            Some(16 + (irq as u32))
-        }
-    })
-}
+// fn interrupt_for_node_nth(node: &device_tree::Node, n: u32) -> Option<u32> {
+    // node.prop_by_name("interrupts").and_then(|interrupt| {
+        // let (mut irq_type, rest) = regs_to_usize(interrupt.value, 1);
+        // let (mut irq, mut rest) = regs_to_usize(rest, 1);
+        // for _ in 0..n {
+            // if rest.len() > 4 { // ignore 0, 0, 15, 4
+                // (irq_type, rest) = regs_to_usize(&rest[4..], 1);
+                // (irq, rest) = regs_to_usize(rest, 1);
+            // } else {
+                // return None
+            // }
+        // }
+        // if irq_type == 0 {
+            // // IRQ
+            // Some(32 + (irq as u32))
+        // } else {
+            // // irq_type == 1, SPI
+            // Some(16 + (irq as u32))
+        // }
+    // })
+// }
 
 #[global_allocator]
 static ALLOCATOR: mutex::Mutex<allocator::FixedBlockAllocator> =
@@ -197,7 +195,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                     irqs.into_iter().find(|&irq| irq == timer::EL1_PHYSICAL_TIMER)
                 })
                 .flatten() {
-                Timer::init(unsafe { gic::GIC::new(irq) });
+                timer::init_timer(unsafe { gic::GIC::new(irq) });
             }
         }
 

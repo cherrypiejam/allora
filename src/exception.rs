@@ -58,7 +58,6 @@ const INTERRUPTS: &[(u32, &dyn Fn(u32, &Frame))] = &[
 pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
     match info.desc {
         _ => match info.kind {
-            Kind::Synchronous => todo!(),
             Kind::IRQ => {
                 for &(irq, handler) in INTERRUPTS.iter() {
                     if gic::is_pending(irq) {
@@ -67,8 +66,7 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
                     }
                 }
             }
-            Kind::FIQ => todo!(),
-            Kind::SError => todo!(),
+            _ => unimplemented!("{:?}", info)
         }
     }
 
@@ -80,7 +78,8 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
 
 fn timer_interrupt_handler(irq: u32, frame: &Frame) {
     // UART.map(|u| write!(u, "{:?}\n", irq));
-    UART.map(|u| write!(u, "."));
+    UART.map(|u| write!(u, ".")); // FIXME disable interrupt when using UART
+    // timer::tick();
     timer::reset_tval();
     gic::clear(irq);
 }
