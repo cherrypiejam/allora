@@ -18,6 +18,7 @@ mod apps;
 mod allocator;
 mod exception;
 mod timer;
+mod linked_list;
 
 use virtio::VirtIORegs;
 
@@ -302,6 +303,10 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     // });
 
     UART.map(|uart| write!(uart, "Booting Allora...{}\n", utils::current_core()));
+
+    // let a: linked_list::List<i32> = linked_list::List::new();
+    // UART.map(|uart| write!(uart, "Booting Allora...{}\n", a.pop());
+    linked_list::linked_list_debug_run(&UART);
 
     // // Debug
     // for i in 0..10 {

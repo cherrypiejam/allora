@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU16, Ordering};
 
 use crate::gic;
+use crate::mutex::Mutex;
 
 #[repr(C)]
 struct Thread<T: Sized> {
@@ -24,7 +25,6 @@ static USED_CPUS: AtomicU16 = AtomicU16::new(!0b1110);
 
 pub fn spawn<F: 'static + FnMut()>(mut f: F) {
     // Wait until there is a free CPU in the bit map
-    // XXX if ordering is relaxed, how to make sure next_cpu is the used one
     let mut used_cpus = USED_CPUS.load(Ordering::Relaxed);
     let mut next_cpu;
     loop {
@@ -73,7 +73,7 @@ pub fn spawn<F: 'static + FnMut()>(mut f: F) {
     }
 }
 
-use crate::mutex::Mutex;
+// use crate::mutex::Mutex;
 use crate::uart::UART;
 use core::fmt::Write;
 pub fn spawnf<F: 'static + FnMut()>(mut f: F, uart: &Mutex<Option<UART>>, count: i32)
