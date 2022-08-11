@@ -2,7 +2,6 @@ use core::ptr::NonNull;
 use core::marker::PhantomData;
 use alloc::boxed::Box;
 use crate::mutex::Mutex;
-use crate::system_off;
 
 struct Node<T> {
     elem: T,
