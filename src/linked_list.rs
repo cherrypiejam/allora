@@ -1,7 +1,8 @@
 use core::ptr::NonNull;
+use core::marker::PhantomData;
 use alloc::boxed::Box;
-
 use crate::mutex::Mutex;
+use crate::system_off;
 
 struct Node<T> {
     elem: T,
@@ -55,6 +56,40 @@ impl<T> List<T> {
         }
         self.tail = node;
     }
+
+    pub fn len(&self) -> usize {
+        let mut count = 0;
+        let mut cur = &self.head;
+        while let Some(node) = cur {
+            cur = unsafe { &(*node.as_ptr()).next };
+            count += 1;
+        }
+        count
+    }
+
+    fn iter(&self) -> ListIter<'_, T> {
+        ListIter {
+            cur: self.head,
+            _marker: PhantomData
+        }
+    }
+}
+
+struct ListIter<'a, T> {
+    cur: Option<NonNull<Node<T>>>,
+    _marker: PhantomData<&'a T>, // like it owns &'a T
+}
+
+impl<'a, T> Iterator for ListIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.cur.map(|cur| {
+            let cur = unsafe { &*cur.as_ptr() };
+            self.cur = cur.next;
+            &cur.elem
+        })
+    }
 }
 
 
@@ -78,23 +113,30 @@ use crate::uart::UART;
 pub fn linked_list_debug_run(uart: &Mutex<Option<UART>>)
 {
     let mut list: List<i32> = List::new();
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
+    list.push(0);
     list.push(1);
     list.push(2);
     list.push(3);
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
     list.push(4);
     list.push(5);
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
+    assert_eq!(list.len(), 6);
+    for (i, &e) in list.iter().enumerate() {
+        assert_eq!(e, i as i32);
+    }
+    assert_eq!(list.pop(), Some(0));
+    assert_eq!(list.pop(), Some(1));
+    assert_eq!(list.pop(), Some(2));
     list.push(6);
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
-    list.push(777);
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
-    uart.map(|u| writeln!(u, "{:?}", list.pop()));
+    assert_eq!(list.len(), 4);
+    assert_eq!(list.pop(), Some(3));
+    assert_eq!(list.pop(), Some(4));
+    assert_eq!(list.pop(), Some(5));
+    assert_eq!(list.pop(), Some(6));
+    assert_eq!(list.pop(), None);
+    assert_eq!(list.pop(), None);
+    assert_eq!(list.pop(), None);
+    assert_eq!(list.len(), 0);
+    uart.map(|u| {
+        writeln!(u, "linked_list_debug_run passed")
+    });
 }
