@@ -49,10 +49,8 @@ context_restore:
 .macro HANDLER type, desc
     .balign 0x80
 
-    // mov x0, 123
-    // mov x28, 666
-
-    stp lr, xzr, [sp, -16]! // save lr before bl
+    // save lr before bl
+    stp lr, xzr, [sp, -16]!
     bl context_stack
 
     mov x0, \type
@@ -60,9 +58,10 @@ context_restore:
     mov x1, sp
     bl exception_handler
 
+    // restore lr after bl
+    // restore lr after bl
     bl context_restore
-    ldp lr, xzr, [sp], 16 // restore lr after bl
-
+    ldp lr, xzr, [sp], 16
     eret
 .endm
 
