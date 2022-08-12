@@ -32,7 +32,7 @@ pub struct Info {
 #[repr(C)]
 pub struct Frame {
     pstate: u64,        // spsr_el1
-    address: u64,        // elr_el1 return address
+    address: u64,       // elr_el1 return address
     x: [u64; 29],       // general purpose registers
     frame_pointer: u64, // x29
     link_register: u64, // x30
@@ -43,12 +43,6 @@ pub struct Frame {
 enum InterruptIndex {
     Timer = timer::EL1_PHYSICAL_TIMER,
 }
-
-// impl InterruptIndex {
-    // fn as_u32(self) -> u32 {
-        // self as u32
-    // }
-// }
 
 const INTERRUPTS: &[(u32, &dyn Fn(u32, &Frame))] = &[
     (InterruptIndex::Timer as u32, &timer_interrupt_handler),
@@ -76,7 +70,7 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
     // }
 }
 
-fn timer_interrupt_handler(irq: u32, frame: &Frame) {
+fn timer_interrupt_handler(irq: u32, _frame: &Frame) {
     // UART.map(|u| write!(u, "{:?}\n", irq));
     UART.map(|u| write!(u, ".")); // FIXME disable interrupt when using UART
     // timer::tick();
@@ -84,13 +78,6 @@ fn timer_interrupt_handler(irq: u32, frame: &Frame) {
     gic::clear(irq);
 }
 
-// fn interrupt_handler(irq: u32, frame: &Frame) {
-    // match irq {
-        // timer::EL1_PHYSICAL_TIMER => {
-        // }
-        // _ => unimplemented!("failed to handle irq {}", irq),
-    // }
-// }
 
 pub fn load_table() {
     unsafe {

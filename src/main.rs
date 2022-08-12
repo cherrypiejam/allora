@@ -54,14 +54,15 @@ fn regs_to_usize(regs: &[u8], cell_size: usize) -> (usize, &[u8]) {
     (result, rest)
 }
 
-// FIXME ref DEN0024A_v8_architecture_PG.pdf:139
+// ref https://developer.arm.com/documentation/den0024/a/
+//  AArch64-Exception-Handling/The-Generic-Interrupt-Controller
 // SGI -> 0-15, PPI -> 16-31, SPI -> 32-1020
 fn get_interrupt(irq_type: usize, irq: usize) -> u32 {
     if irq_type == 0 {
-        // IRQ
+        // SPI
         32 + (irq as u32)
     } else {
-        // irq_type == 1, SPI
+        // irq_type == 1, PPI
         16 + (irq as u32)
     }
 }
@@ -94,32 +95,11 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<vec::Vec<u32>> {
     })
 }
 
-// fn interrupt_for_node_nth(node: &device_tree::Node, n: u32) -> Option<u32> {
-    // node.prop_by_name("interrupts").and_then(|interrupt| {
-        // let (mut irq_type, rest) = regs_to_usize(interrupt.value, 1);
-        // let (mut irq, mut rest) = regs_to_usize(rest, 1);
-        // for _ in 0..n {
-            // if rest.len() > 4 { // ignore 0, 0, 15, 4
-                // (irq_type, rest) = regs_to_usize(&rest[4..], 1);
-                // (irq, rest) = regs_to_usize(rest, 1);
-            // } else {
-                // return None
-            // }
-        // }
-        // if irq_type == 0 {
-            // // IRQ
-            // Some(32 + (irq as u32))
-        // } else {
-            // // irq_type == 1, SPI
-            // Some(16 + (irq as u32))
-        // }
-    // })
-// }
 
 #[global_allocator]
 static ALLOCATOR: mutex::Mutex<allocator::FixedBlockAllocator> =
     mutex::Mutex::new(allocator::FixedBlockAllocator::new());
-// static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
+
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
