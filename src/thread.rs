@@ -1,8 +1,25 @@
 use alloc::boxed::Box;
+use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU16, Ordering};
 
 use crate::gic;
 use crate::mutex::Mutex;
+use crate::linked_list::List;
+
+type ThreadBox = Box<Thread<Box<dyn FnMut() + 'static>>>;
+static THREADS: Mutex<List<ThreadBox>> = Mutex::new(List::new());
+
+pub fn _spawn<F: 'static + FnMut() + Sync>(mut f: F) {
+    let conf = Box::new(Thread {
+        main: thread_start,
+        stack: Box::new([0; 1024]),
+        userdata: Box::new(move || {
+            gic::init();
+            f();
+        }),
+    });
+    THREADS.lock().push(conf)
+}
 
 #[repr(C)]
 struct Thread<T: Sized> {
@@ -20,7 +37,6 @@ extern "C" fn thread_start(mut conf: Box<Thread<Box<dyn FnMut()>>>) {
     (conf.userdata)()
 }
 
-// static USED_CPUS: AtomicU16 = AtomicU16::new(!0b110);
 static USED_CPUS: AtomicU16 = AtomicU16::new(!0b1110);
 
 pub fn spawn<F: 'static + FnMut()>(mut f: F) {

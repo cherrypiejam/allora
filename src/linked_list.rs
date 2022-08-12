@@ -74,6 +74,9 @@ impl<T> List<T> {
     }
 }
 
+unsafe impl<T> Send for List<T> {} // FIXME
+unsafe impl<T: Sync> Sync for List<T> {}
+
 struct ListIter<'a, T> {
     cur: Option<NonNull<Node<T>>>,
     _marker: PhantomData<&'a T>, // like it owns &'a T
@@ -92,20 +95,22 @@ impl<'a, T> Iterator for ListIter<'a, T> {
 }
 
 
-pub struct LockedList<T> {
-    list: Mutex<List<T>>,
-}
+// pub struct LockedList<T> {
+    // list: Mutex<List<T>>,
+// }
 
-impl<T> LockedList<T> {
-    pub const fn new() -> Self {
-        let list = Mutex::new(List::new());
-        LockedList { list }
-    }
+// impl<T> LockedList<T> {
+    // pub const fn new() -> Self {
+        // let list = Mutex::new(List::new());
+        // LockedList { list }
+    // }
 
-    pub fn pop(&mut self) -> Option<T> {
-        self.list.lock().pop()
-    }
-}
+    // pub fn pop(&mut self) -> Option<T> {
+        // self.list.lock().pop()
+    // }
+
+    // pub fn push(&mut )
+// }
 
 use core::fmt::Write;
 use crate::uart::UART;
