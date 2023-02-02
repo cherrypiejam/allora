@@ -10,6 +10,8 @@ _start:
 	cmp x0,  #0
 	mov x0, #0x40000000
 
+    // bl system_off
+
 	/* Enable NEON/SIMD instructions */
 	mov x30, #(0x3 << 20)
 	msr cpacr_el1, x30
@@ -33,13 +35,17 @@ start_core_1:
 	isb
 	/* -- */
 
-  ldr     x30, [x0, #8]
-	add     x30, x30, #8192
-  mov     sp, x30
+  // ldr     x30, [x0, #8]         // *(thread_addr + 8 bytes) stack..
+	// add     x30, x30, #8192     // x30 = beginning of a stack?
+    add     x30, x0, 8           // *(thread_addr + 8 bytes) stack..
+	add     x30, x30, 8192         // x30 = beginning of a stack?
+
+    mov     sp, x30
 	ldr     x3, [x0, #0]
-  br      x3
+    br      x3
+
 spin:
-  bl spin
+    bl spin
 
 .equ PSCI_0_2_FN64_CPU_ON, 0xc4000003
 .globl cpu_on

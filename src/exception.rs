@@ -72,7 +72,7 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
 
 fn timer_interrupt_handler(irq: u32, _frame: &Frame) {
     // UART.map(|u| write!(u, "{:?}\n", irq));
-    UART.map(|u| write!(u, ".")); // FIXME disable interrupt when using UART
+    // UART.map(|u| write!(u, ".")); // FIXME disable interrupt when using UART
     // timer::tick();
     timer::reset_tval();
     gic::clear(irq);

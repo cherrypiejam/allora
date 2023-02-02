@@ -168,6 +168,9 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                 });
         }
 
+
+
+
         exception::load_table();
 
         if let Some(timer) = root.child_by_name("timer") {
@@ -286,7 +289,22 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
 
     // let a: linked_list::List<i32> = linked_list::List::new();
     // UART.map(|uart| write!(uart, "Booting Allora...{}\n", a.pop());
-    linked_list::linked_list_debug_run(&UART);
+    // linked_list::linked_list_debug_run(&UART);
+
+    thread::spawnf(|| {
+        let sp: u64;
+        unsafe {
+            asm!("mov {:x}, sp",
+                 out(reg) sp);
+        }
+
+        UART.map(|uart| {
+            // let _ = writeln!(uart, "current sp before");
+            let _ = writeln!(uart, "current sp = {:x}", sp);
+            let _ = writeln!(uart, "masked sp = {:x}", sp & !0b1_111_111_111);
+            writeln!(uart, "masked sp = {:x}", sp & !0b1_111_111_111_111)
+        });
+    }, &UART);
 
     // // Debug
     // for i in 0..10 {
