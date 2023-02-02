@@ -1,4 +1,5 @@
 use core::fmt;
+use core::arch::asm;
 
 pub trait HasEndianness: Eq + PartialEq + Copy + Clone + Default {
     fn from_be(self) -> Self;

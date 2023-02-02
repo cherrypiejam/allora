@@ -1,6 +1,7 @@
 use core::fmt::Write;
 use core::ptr;
 use core::str;
+use core::arch::asm;
 
 use crate::gic::GIC;
 

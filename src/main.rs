@@ -1,6 +1,6 @@
 #![no_main]
 #![no_std]
-#![feature(asm, alloc_error_handler, global_asm)]
+#![feature(alloc_error_handler)]
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -22,6 +22,7 @@ global_asm!(include_str!("boot.S"));
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
+use core::arch::{asm, global_asm};
 
 extern "C" {
     static HEAP_START: usize;
