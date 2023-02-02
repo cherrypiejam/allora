@@ -47,17 +47,21 @@ fn regs_to_usize(regs: &[u8], cell_size: usize) -> (usize, &[u8]) {
     (result, rest)
 }
 
+fn get_interrupt(irq_type: usize, irq: usize) -> u32 {
+    if irq_type == 0 {
+        // SPI
+        32 + (irq as u32)
+    } else {
+        // irq_type == 1, PPI
+        16 + (irq as u32)
+    }
+}
+
 fn interrupt_for_node(node: &device_tree::Node) -> Option<u32> {
     node.prop_by_name("interrupts").map(|interrupt| {
         let (irq_type, rest) = regs_to_usize(interrupt.value, 1);
         let (irq, _rest) = regs_to_usize(rest, 1);
-        if irq_type == 0 {
-            // IRQ
-            32 + (irq as u32)
-        } else {
-            // irq_type == 1, SPI
-            16 + (irq as u32)
-        }
+        get_interrupt(irq_type, irq)
     })
 }
 

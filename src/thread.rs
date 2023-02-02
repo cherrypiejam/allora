@@ -19,7 +19,7 @@ extern "C" fn thread_start(mut conf: Box<Thread<Box<dyn FnMut()>>>) {
     (conf.userdata)()
 }
 
-static USED_CPUS: AtomicU16 = AtomicU16::new(!0b110);
+static USED_CPUS: AtomicU16 = AtomicU16::new(!0b1110);
 
 pub fn spawn<F: 'static + FnMut()>(mut f: F) {
     // Wait until there is a free CPU in the bit map
@@ -33,7 +33,7 @@ pub fn spawn<F: 'static + FnMut()>(mut f: F) {
             used_cpus = USED_CPUS.load(Ordering::Relaxed);
         }
         next_cpu = used_cpus.trailing_ones() as usize;
-        let new_used_cpus = used_cpus | (used_cpus << next_cpu);
+        let new_used_cpus = used_cpus | (0b1 << next_cpu);
         if let Err(uc) =
             USED_CPUS.compare_exchange(used_cpus, new_used_cpus, Ordering::SeqCst, Ordering::SeqCst)
         {
@@ -51,7 +51,7 @@ pub fn spawn<F: 'static + FnMut()>(mut f: F) {
             gic::init();
             f();
             loop {
-                let new_used_cpus = used_cpus & !(used_cpus << next_cpu);
+                let new_used_cpus = used_cpus & !(0b1 << next_cpu);
                 if let Err(uc) = USED_CPUS.compare_exchange(
                     used_cpus,
                     new_used_cpus,
