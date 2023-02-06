@@ -14,6 +14,7 @@ pub mod utils;
 pub mod virtio;
 
 mod apps;
+mod arena;
 
 use virtio::VirtIORegs;
 
@@ -195,18 +196,18 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         .as_mut()
         .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
 
-    thread::spawn(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}\n", utils::current_core());
-        });
-        NET.map(|mut net| {
-            let mut shell = apps::shell::Shell {
-                blk: &BLK,
-                entropy: &ENTROPY,
-            };
-            apps::net::Net { net: &mut net }.run(&mut shell)
-        });
-    });
+    // thread::spawn(|| {
+        // UART.map(|uart| {
+            // let _ = write!(uart, "Running from core {}\n", utils::current_core());
+        // });
+        // NET.map(|mut net| {
+            // let mut shell = apps::shell::Shell {
+                // blk: &BLK,
+                // entropy: &ENTROPY,
+            // };
+            // apps::net::Net { net: &mut net }.run(&mut shell)
+        // });
+    // });
 
     loop {
         unsafe {
