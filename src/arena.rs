@@ -67,66 +67,49 @@ impl Arena {
         self.head = Some(new);
     }
 
-    fn get_chunk(&mut self, size: usize, align: usize) -> Option<(NonNull<ChunkHeader>, usize)> {
-        unsafe {
-            let mut cursor = self.head;
-            while let Some(chunk) = cursor.map(|mut c| c.as_mut()) {
-                if let Some(addr) = chunk.check_alloc(size, align) {
-                    let prev = chunk.prev.take();
-                    let next = chunk.next.take();
-                    match (prev, next) {
-                        (Some(mut p), Some(mut n)) => {
-                            p.as_mut().next = next;
-                            n.as_mut().prev = prev;
-                        }
-                        (_, Some(mut n)) => {
-                            n.as_mut().prev = prev;
-                            self.head = next;
-                        }
-                        (Some(mut p), _) => {
-                            p.as_mut().next = next;
-                        }
-                        _ => panic!("what the heck?")
+    unsafe fn get_chunk(&mut self, size: usize, align: usize) -> Option<(NonNull<ChunkHeader>, usize)> {
+        let mut cursor = self.head;
+        while let Some(chunk) = cursor.map(|mut c| c.as_mut()) {
+            if let Some(addr) = chunk.check_alloc(size, align) {
+                let prev = chunk.prev.take();
+                let next = chunk.next.take();
+                match (prev, next) {
+                    (Some(mut p), Some(mut n)) => {
+                        p.as_mut().next = next;
+                        n.as_mut().prev = prev;
                     }
-                    return cursor.map(|c| (c, addr));
+                    (_, Some(mut n)) => {
+                        n.as_mut().prev = prev;
+                        self.head = next;
+                    }
+                    (Some(mut p), _) => {
+                        p.as_mut().next = next;
+                    }
+                    _ => panic!("what the heck?")
                 }
+                return cursor.map(|c| (c, addr));
             }
-            None
+            cursor = chunk.next
+        }
+        None
+    }
+
+    fn try_allocate(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
+        unsafe {
+            self.get_chunk(size, align)
+                .map(|(c, a)| (c.as_ref(), a))
+                .map(|(chunk, addr)| {
+                    let new_addr = addr.checked_add(size).unwrap();
+                    let new_size = chunk.end().checked_sub(new_addr).unwrap();
+                    self.add_chunk(new_addr, new_size);
+                    NonNull::new_unchecked(addr as *mut _)
+                })
         }
     }
 
-    fn try_alloc(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
-        unsafe {
-            let mut cursor = self.head;
-            while let Some(chunk) = cursor.map(|mut c| c.as_mut()) {
-                if let Some(alloc_ptr) = chunk.check_alloc(size, align) {
-                    let prev = chunk.prev.take();
-                    let next = chunk.next.take();
-                    match (prev, next) {
-                        (Some(mut p), Some(mut n)) => {
-                            p.as_mut().next = next;
-                            n.as_mut().prev = prev;
-                        }
-                        (_, Some(mut n)) => {
-                            n.as_mut().prev = prev;
-                            self.head.replace(n);
-                        }
-                        (Some(mut p), _) => {
-                            p.as_mut().next = next;
-                        }
-                        _ => panic!("what the heck?")
-                    }
-                    let addr = chunk as *mut _ as usize;
-                    let new_addr = addr.checked_add(size).expect("Checked add");
-                    let new_size = chunk.size.checked_sub(size).expect("Checked sub");
-                    self.add_chunk(new_addr, new_size);
-                    return Some(alloc_ptr);
-                }
-                cursor = chunk.next
-            }
-            None
-        }
-    }
+    fn allocate() { todo!() }
+
+    fn deallocate() { todo!() }
 
     fn split(&mut self) -> Arena { todo!() }
 
@@ -135,11 +118,19 @@ impl Arena {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::*;
     use core::fmt::Write;
+    const HEAP_SIZE: usize = 500_000_000;
 
     #[test_case]
     fn test_something(uart: &mut uart::UART) {
-        assert_eq!(1, 1);
+        unsafe {
+            let heap_start = &HEAP_START as *const _ as usize;
+            let heap_size = HEAP_SIZE;
+            let mut arena = Arena::empty();
+            arena.init(heap_start, heap_size);
+            assert_eq!(1, 1);
+        }
     }
 }
