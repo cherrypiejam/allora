@@ -2,6 +2,10 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 
+#![feature(custom_test_frameworks)]
+#![test_runner(test_runner)]
+#![reexport_test_harness_main = "test_main"]
+
 extern crate alloc;
 use alloc::boxed::Box;
 
@@ -180,6 +184,9 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         }
     }
 
+    #[cfg(test)]
+    test_main();
+
     thread::spawn(|| {
         UART.map(|uart| {
             let _ = write!(uart, "Running from core {}\n", utils::current_core());
@@ -196,18 +203,18 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         .as_mut()
         .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
 
-    // thread::spawn(|| {
-        // UART.map(|uart| {
-            // let _ = write!(uart, "Running from core {}\n", utils::current_core());
-        // });
-        // NET.map(|mut net| {
-            // let mut shell = apps::shell::Shell {
-                // blk: &BLK,
-                // entropy: &ENTROPY,
-            // };
-            // apps::net::Net { net: &mut net }.run(&mut shell)
-        // });
-    // });
+    thread::spawn(|| {
+        UART.map(|uart| {
+            let _ = write!(uart, "Running from core {}\n", utils::current_core());
+        });
+        NET.map(|mut net| {
+            let mut shell = apps::shell::Shell {
+                blk: &BLK,
+                entropy: &ENTROPY,
+            };
+            apps::net::Net { net: &mut net }.run(&mut shell)
+        });
+    });
 
     loop {
         unsafe {
@@ -226,4 +233,25 @@ fn panic(panic_info: &PanicInfo<'_>) -> ! {
 #[alloc_error_handler]
 fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout)
+}
+
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Testable]) {
+    let mut uart = unsafe { uart::UART::new(0x0900_0000 as _, gic::GIC::new(uart::IRQ)) };
+    for test in tests {
+        test.run(&mut uart);
+    }
+    unsafe { system_off() }
+}
+
+trait Testable {
+    fn run(&self, uart: &mut uart::UART);
+}
+
+impl<T: Fn(&mut uart::UART)> Testable for T {
+    fn run(&self, uart: &mut uart::UART) {
+        let _ = write!(uart, "{}...\t", core::any::type_name::<T>());
+        self(uart);
+        let _ = writeln!(uart, "[ok]");
+    }
 }

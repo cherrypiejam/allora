@@ -24,13 +24,14 @@ impl ChunkHeader {
         (self.start() + (align - 1)) & !(align - 1)
     }
 
-    fn check_alloc(&self, size: usize, align: usize) -> Option<NonNull<u8>> {
-        let chunk_start = self.aligned_start(align);
-        let chunk_end = self.end();
-        let available_size = chunk_end - chunk_start;
+    fn check_alloc(&self, size: usize, align: usize) -> Option<usize> {
+        let start = self.aligned_start(align);
+        let end = self.end();
+        let available_size = end - start;
         let exceeded_size = available_size - size;
         if available_size >= size && exceeded_size >= mem::size_of::<ChunkHeader>() {
-            unsafe { Some(NonNull::new_unchecked(chunk_start as *mut u8)) }
+            Some(start)
+            // unsafe { Some(NonNull::new_unchecked(chunk_start as *mut u8)) }
         } else {
             None
         }
@@ -66,8 +67,32 @@ impl Arena {
         self.head = Some(new);
     }
 
-    fn find_chunk(&mut self, addr: usize, align: usize) {
-        todo!()
+    fn get_chunk(&mut self, size: usize, align: usize) -> Option<(NonNull<ChunkHeader>, usize)> {
+        unsafe {
+            let mut cursor = self.head;
+            while let Some(chunk) = cursor.map(|mut c| c.as_mut()) {
+                if let Some(addr) = chunk.check_alloc(size, align) {
+                    let prev = chunk.prev.take();
+                    let next = chunk.next.take();
+                    match (prev, next) {
+                        (Some(mut p), Some(mut n)) => {
+                            p.as_mut().next = next;
+                            n.as_mut().prev = prev;
+                        }
+                        (_, Some(mut n)) => {
+                            n.as_mut().prev = prev;
+                            self.head = next;
+                        }
+                        (Some(mut p), _) => {
+                            p.as_mut().next = next;
+                        }
+                        _ => panic!("what the heck?")
+                    }
+                    return cursor.map(|c| (c, addr));
+                }
+            }
+            None
+        }
     }
 
     fn try_alloc(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
@@ -101,5 +126,20 @@ impl Arena {
             }
             None
         }
+    }
+
+    fn split(&mut self) -> Arena { todo!() }
+
+    fn merge(&mut self, arena: Arena) { todo!() }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::*;
+    use core::fmt::Write;
+
+    #[test_case]
+    fn test_something(uart: &mut uart::UART) {
+        assert_eq!(1, 1);
     }
 }
