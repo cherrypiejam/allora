@@ -74,11 +74,14 @@ fn interrupt_for_node(node: &device_tree::Node) -> Option<u32> {
 #[global_allocator]
 static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
+
+static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
+
 #[no_mangle]
 pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     gic::init();
 
-    static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
+    // static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
     static BLK: mutex::Mutex<Option<virtio::VirtIOBlk>> = mutex::Mutex::new(None);
     static ENTROPY: mutex::Mutex<Option<virtio::VirtIOEntropy>> = mutex::Mutex::new(None);
