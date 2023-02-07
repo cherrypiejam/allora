@@ -175,7 +175,15 @@ impl Arena {
         }
     }
 
-    fn deallocate() { todo!() }
+    unsafe fn deallocate(&mut self, ptr: *mut u8, layout: Layout) {
+        let size = layout
+            .align_to(mem::align_of::<Chunk>())
+            .unwrap()
+            .pad_to_align()
+            .size()
+            .max(mem::size_of::<Chunk>());
+        self.chunk_list.push_region(ptr as usize, size)
+    }
 
     fn split(&mut self, size: usize, uart: &mut crate::uart::UART) -> Option<Arena> {
         // Only look for the entire chunk of data
@@ -210,16 +218,52 @@ mod test {
     }
 
     #[test_case]
-    fn test_something(uart: &mut uart::UART) {
+    fn test_alloc(uart: &mut uart::UART) {
         unsafe {
             let mut arena = init_arena();
             let layout = Layout::from_size_align(100, 1).unwrap();
             for _ in 0..10000 {
                 let p = arena.allocate(layout, uart);
                 assert!(!p.is_null());
-                let a = arena.split(1000, uart);
-                assert!(a.is_some());
-                let _ = arena.merge(a.unwrap());
+            }
+        }
+    }
+
+    #[test_case]
+    #[allow(invalid_value)]
+    fn test_dealloc(uart: &mut uart::UART) {
+        unsafe {
+            let mut arena = init_arena();
+            let layout = Layout::from_size_align(100, 1).unwrap();
+            let mut plist: [*mut u8; 1000] = mem::MaybeUninit::uninit().assume_init();
+            for elem in plist.iter_mut() {
+                let p = arena.allocate(layout, uart);
+                assert!(!p.is_null());
+                ptr::write(elem, p);
+            }
+            for elem in plist {
+                arena.deallocate(elem, layout);
+            }
+        }
+    }
+
+    // #[test_case]
+    fn _test_buggy(_: &mut uart::UART) {
+        let a = [1; 7800];
+        for b in a.iter() {}
+    }
+
+    // #[test_case]
+    fn _test_dealloc_buggy(uart: &mut uart::UART) {
+        unsafe {
+            let mut arena = init_arena();
+            let layout = Layout::from_size_align(100, 1).unwrap();
+            // stuck this line
+            let plist = [{writeln!(uart, "1"); let p = arena.allocate(layout, uart); writeln!(uart, "1"); p}; 10000];
+            writeln!(uart, "plist: {}", plist.len());
+            for p in plist {
+                writeln!(uart, "p: {}", *p as usize);
+                arena.deallocate(p, layout);
             }
         }
     }
@@ -241,14 +285,14 @@ mod test {
     fn test_split_merge_batch(uart: &mut uart::UART) {
         unsafe {
             let mut arena = init_arena();
-            let mut arena_list: [Option<Arena>; 1000] = mem::MaybeUninit::uninit().assume_init();
+            let mut arena_list: [Arena; 1000] = mem::MaybeUninit::uninit().assume_init();
             for elem in arena_list.iter_mut() {
                 let new_arena = arena.split(1000, uart);
                 assert!(new_arena.is_some());
-                ptr::write(elem, new_arena);
+                ptr::write(elem, new_arena.unwrap());
             }
-            for elem in arena_list.iter_mut() {
-                arena.merge(elem.take().unwrap());
+            for elem in arena_list {
+                arena.merge(elem);
             }
         }
     }
