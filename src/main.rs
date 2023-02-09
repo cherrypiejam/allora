@@ -8,6 +8,7 @@
 
 extern crate alloc;
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 
 pub mod device_tree;
 pub mod gic;
@@ -19,11 +20,14 @@ pub mod virtio;
 
 mod apps;
 mod arena;
+mod exception;
+mod timer;
 
 use virtio::VirtIORegs;
 
 #[cfg(target_arch = "aarch64")]
 global_asm!(include_str!("boot.S"));
+global_asm!(include_str!("exception.S"));
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
@@ -68,6 +72,25 @@ fn interrupt_for_node(node: &device_tree::Node) -> Option<u32> {
         let (irq_type, rest) = regs_to_usize(interrupt.value, 1);
         let (irq, _rest) = regs_to_usize(rest, 1);
         get_interrupt(irq_type, irq)
+    })
+}
+
+fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
+    node.prop_by_name("interrupts").map(|interrupt| {
+        let mut interrupts: Vec<u32> = Vec::new();
+        let (mut irq_type, rest) = regs_to_usize(interrupt.value, 1);
+        let (mut irq, mut rest) = regs_to_usize(rest, 1);
+        interrupts.push(get_interrupt(irq_type, irq));
+        loop {
+            if rest.len() > 4 { // Stop at 0, 0, 15, 4
+                (irq_type, rest) = regs_to_usize(&rest[4..], 1);
+                (irq, rest) = regs_to_usize(rest, 1);
+                interrupts.push(get_interrupt(irq_type, irq));
+            } else {
+                break
+            }
+        }
+        interrupts
     })
 }
 
@@ -142,6 +165,18 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                 });
         }
 
+        exception::load_table();
+
+        if let Some(timer) = root.child_by_name("timer") {
+            if let Some(irq) = interrupts_for_node(&timer)
+                .map(|irqs| {
+                    irqs.into_iter().find(|&irq| irq == timer::EL1_PHYSICAL_TIMER)
+                })
+                .flatten() {
+                timer::init_timer(unsafe { gic::GIC::new(irq) });
+            }
+        }
+
         for child in root.children_by_prop("compatible", |prop| prop.value == b"virtio,mmio\0") {
             if let Some(reg) = child.prop_by_name("reg") {
                 let (addr, _rest) = regs_to_usize(reg.value, address_cell);
@@ -190,34 +225,37 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     #[cfg(test)]
     test_main();
 
-    thread::spawn(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}\n", utils::current_core());
-        });
-
-        let mut shell = apps::shell::Shell {
-            blk: &BLK,
-            entropy: &ENTROPY,
-        };
-        apps::shell::main(&UART, &mut shell);
-    });
-
-    UART.lock()
-        .as_mut()
-        .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
-
-    thread::spawn(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}\n", utils::current_core());
-        });
-        NET.map(|mut net| {
+    let run_task = false;
+    if run_task {
+        thread::spawn(|| {
+            UART.map(|uart| {
+                let _ = write!(uart, "Running from core {}\n", utils::current_core());
+            });
             let mut shell = apps::shell::Shell {
                 blk: &BLK,
                 entropy: &ENTROPY,
             };
-            apps::net::Net { net: &mut net }.run(&mut shell)
+            apps::shell::main(&UART, &mut shell);
         });
-    });
+
+        UART.lock()
+            .as_mut()
+            .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
+
+        thread::spawn(|| {
+            UART.map(|uart| {
+                let _ = write!(uart, "Running from core {}\n", utils::current_core());
+            });
+            NET.map(|mut net| {
+                let mut shell = apps::shell::Shell {
+                    blk: &BLK,
+                    entropy: &ENTROPY,
+                };
+                apps::net::Net { net: &mut net }.run(&mut shell)
+            });
+        });
+
+    }
 
     loop {
         unsafe {
