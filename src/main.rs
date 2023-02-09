@@ -97,6 +97,7 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 #[global_allocator]
 static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
+static TASKS: mutex::Mutex<Option<Vec<usize>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
@@ -221,6 +222,8 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
             }
         }
     }
+
+    let _ = TASKS.lock().replace(Vec::new());
 
     #[cfg(test)]
     test_main();

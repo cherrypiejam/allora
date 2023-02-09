@@ -1,5 +1,6 @@
 use core::arch::asm;
 use crate::gic::GIC;
+use crate::TASKS;
 
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
 const SYS_FREQ: u32 = 62_500_000; // 62.5 MHz
@@ -24,6 +25,9 @@ pub fn init_timer(irq: GIC) {
 }
 
 pub fn tick() {
+    TASKS.map(|tasks| {
+        tasks.sort();
+    });
     reset_tval()
 }
 

@@ -51,7 +51,7 @@ const INTERRUPTS: &[(u32, &dyn Fn(u32, &Frame))] = &[
 #[no_mangle]
 pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
     match info.desc {
-        _ => match info.kind {
+        Description::CurrentElSPx => match info.kind {
             Kind::IRQ => {
                 for &(irq, handler) in INTERRUPTS.iter() {
                     if gic::is_pending(irq) {
@@ -61,12 +61,8 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
             }
             _ => unimplemented!("{:?}", info)
         }
+        _ => unimplemented!("{:?}", info)
     }
-
-    // UART.map(|u| write!(u, "{:?}\n{:#?}\n", info, frame));
-    // unsafe {
-        // system_off();
-    // }
 }
 
 fn timer_interrupt_handler(irq: u32, _frame: &Frame) {
