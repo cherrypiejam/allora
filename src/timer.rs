@@ -1,12 +1,15 @@
 use core::arch::asm;
 use crate::gic::GIC;
 use crate::TASKS;
+use crate::mutex::Mutex;
 
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
 const SYS_FREQ: u32 = 62_500_000; // 62.5 MHz
 
 const TIMER_FREQ: u32 = 1;
 const TIMER_TVAL: u32 = SYS_FREQ / TIMER_FREQ;
+
+static TICKS: Mutex<Option<usize>> = Mutex::new(Some(0));
 
 pub fn init_timer(irq: GIC) {
     unsafe {
@@ -25,9 +28,16 @@ pub fn init_timer(irq: GIC) {
 }
 
 pub fn tick() {
-    TASKS.map(|tasks| {
-        tasks.sort();
+
+    TICKS.map(|ticks| {
+        if *ticks % 4 == 0 {
+            TASKS.map(|tasks| {
+                tasks.sort()
+            });
+        }
+        *ticks += 1;
     });
+
     reset_tval()
 }
 
@@ -48,6 +58,6 @@ fn reset_tval() {
             // in(reg) 62500000,
             // out(reg) i);
     // }
-    // use core::fmt::Write;
+   // use core::fmt::Write;
     // crate::UART.map(|u| writeln!(u, "{:?}", i));
 // }

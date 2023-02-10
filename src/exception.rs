@@ -66,7 +66,7 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
 }
 
 fn timer_interrupt_handler(irq: u32, _frame: &Frame) {
-    // UART.map(|u| write!(u, "."));
+    UART.map(|u| write!(u, "."));
     timer::tick();
     gic::clear(irq);
 }

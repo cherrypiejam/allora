@@ -1,7 +1,9 @@
 use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU16, Ordering};
+use core::time::Duration;
 
 use crate::gic;
+use crate::arena::Arena;
 
 #[repr(C)]
 struct Thread<T: Sized> {
@@ -70,3 +72,9 @@ pub fn spawn<F: 'static + FnMut()>(mut f: F) {
         cpu_on(next_cpu, conf as *mut _);
     }
 }
+
+pub fn spawnf<F: 'static + FnMut()>(f: F, arena: Arena, lifetime: Duration) {
+    spawn(f);
+    // add to task list
+}
+
