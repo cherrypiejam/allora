@@ -75,7 +75,19 @@ fn timer_interrupt_handler(irq: u32, _frame: &Frame) {
 pub fn load_table() {
     unsafe {
         asm!("ldr x0, =exception_vector_table",
-             "msr VBAR_EL1, x0",
-             "msr DAIFClr, 0x7");
+             "msr VBAR_EL1, x0");
+    }
+    interrupt_enable();
+}
+
+pub fn interrupt_enable() {
+    unsafe {
+        asm!("msr DAIFClr, 7");
+    }
+}
+
+pub fn interrupt_disable() {
+    unsafe {
+        asm!("msr DAIFSet, 7");
     }
 }

@@ -1,15 +1,16 @@
 use core::arch::asm;
+use core::sync::atomic::{AtomicU64, Ordering};
+use core::time;
 use crate::gic::GIC;
-use crate::TASKS;
-use crate::mutex::Mutex;
+use crate::TASK_LIST;
 
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
 const SYS_FREQ: u32 = 62_500_000; // 62.5 MHz
 
-const TIMER_FREQ: u32 = 1;
+const TIMER_FREQ: u32 = 10;
 const TIMER_TVAL: u32 = SYS_FREQ / TIMER_FREQ;
 
-static TICKS: Mutex<Option<usize>> = Mutex::new(Some(0));
+static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
 
 pub fn init_timer(irq: GIC) {
     unsafe {
@@ -27,17 +28,19 @@ pub fn init_timer(irq: GIC) {
     irq.enable();
 }
 
+pub fn current_ticks() -> u64 {
+    TICK_COUNT.load(Ordering::SeqCst)
+}
+
+pub fn convert_to_ticks(duration: time::Duration) -> u64 {
+    duration.as_millis() as u64 / 1000 * TIMER_FREQ as u64
+}
+
 pub fn tick() {
-
-    TICKS.map(|ticks| {
-        if *ticks % 4 == 0 {
-            TASKS.map(|tasks| {
-                tasks.sort()
-            });
-        }
-        *ticks += 1;
-    });
-
+    let count = TICK_COUNT.fetch_add(1, Ordering::SeqCst);
+    if count % 4 == 0 {
+        // TODO check time
+    }
     reset_tval()
 }
 

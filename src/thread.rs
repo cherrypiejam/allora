@@ -4,6 +4,9 @@ use core::time::Duration;
 
 use crate::gic;
 use crate::arena::Arena;
+use crate::timer;
+use crate::exception;
+use crate::TASK_LIST;
 
 #[repr(C)]
 struct Thread<T: Sized> {
@@ -23,7 +26,7 @@ extern "C" fn thread_start(mut conf: Box<Thread<Box<dyn FnMut()>>>) {
 
 static USED_CPUS: AtomicU16 = AtomicU16::new(!0b1110);
 
-pub fn spawn<F: 'static + FnMut()>(mut f: F) {
+fn prepare<F: 'static + FnMut()>(mut f: F, timed: bool) -> (usize, *mut u8) {
     // Wait until there is a free CPU in the bit map
     let mut used_cpus = USED_CPUS.load(Ordering::Relaxed);
     let mut next_cpu;
@@ -65,16 +68,38 @@ pub fn spawn<F: 'static + FnMut()>(mut f: F) {
                     break;
                 }
             }
-            unsafe { cpu_off(next_cpu) };
+            if !timed {
+                unsafe { cpu_off(next_cpu); }
+            }
         }),
     }));
-    unsafe {
-        cpu_on(next_cpu, conf as *mut _);
-    }
+    (next_cpu, conf as *mut _)
 }
 
-pub fn spawnf<F: 'static + FnMut()>(f: F, arena: Arena, lifetime: Duration) {
-    spawn(f);
-    // add to task list
+pub fn spawn<F: 'static + FnMut()>(f: F) {
+    let (next_cpu, conf) = prepare(f, false);
+    unsafe { cpu_on(next_cpu, conf as *mut _); }
+}
+
+pub struct Task {
+    cpu: usize,
+    pub alive_until: u64, // until this tick, cpu_off(core), to remove termination channel, no unsafe {
+}
+
+pub fn launch<F: 'static + FnMut()>(arena: Arena, lifetime: Duration, f: F) {
+    let (next_cpu, conf) = prepare(f, true);
+    unsafe { cpu_on(next_cpu, conf as *mut _); }
+    let task = Task {
+        cpu: next_cpu,
+        alive_until: timer::current_ticks() + timer::convert_to_ticks(lifetime)
+    };
+    exception::interrupt_disable();
+    TASK_LIST.map(|t| {
+        t.push(task);
+        t.sort_by(|a, b| {
+            a.alive_until.partial_cmp(&b.alive_until).unwrap()
+        })
+    });
+    exception::interrupt_enable();
 }
 

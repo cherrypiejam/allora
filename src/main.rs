@@ -97,7 +97,7 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 #[global_allocator]
 static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
-static TASKS: mutex::Mutex<Option<Vec<usize>>> = mutex::Mutex::new(None);
+static TASK_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
@@ -223,10 +223,24 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         }
     }
 
-    let _ = TASKS.lock().replace(Vec::new());
+    TASK_LIST.lock().replace(Vec::new());
 
     #[cfg(test)]
     test_main();
+
+    // exception::interrupt_disable();
+
+    // unsafe {
+        // let mut a: [u64; 3] = [0; 3];
+        // asm!("mrs {}, TCR_EL1",
+             // // "mrs {}, TCR_EL2",
+             // // "mrs {}, TCR_EL3",
+             // out(reg) a[0],
+             // // out(reg) a[1],
+             // // out(reg) a[2],
+        // );
+        // UART.map(|u| writeln!(u, "hhh {:b}, {:b}, {:b}", a[0], a[1], a[2]));
+    // }
 
     let run_task = false;
     if run_task {
