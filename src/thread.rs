@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::{AtomicU16, Ordering, AtomicBool};
 use core::time::Duration;
+use alloc::sync::Arc;
 
 use crate::gic;
 use crate::arena::Arena;
@@ -17,7 +18,7 @@ struct Thread<T: Sized> {
 
 extern "C" {
     fn cpu_on(core: usize, main: *mut core::ffi::c_void);
-    fn cpu_off(core: usize);
+    pub fn cpu_off();
 }
 
 extern "C" fn thread_start(mut conf: Box<Thread<Box<dyn FnMut()>>>) {
@@ -26,7 +27,7 @@ extern "C" fn thread_start(mut conf: Box<Thread<Box<dyn FnMut()>>>) {
 
 static USED_CPUS: AtomicU16 = AtomicU16::new(!0b1110);
 
-fn prepare<F: 'static + FnMut()>(mut f: F, timed: bool) -> (usize, *mut u8) {
+fn prepare<F: 'static + FnMut()>(mut f: F, hold: Option<Arc<AtomicBool>>) -> (usize, *mut u8) {
     // Wait until there is a free CPU in the bit map
     let mut used_cpus = USED_CPUS.load(Ordering::Relaxed);
     let mut next_cpu;
@@ -54,7 +55,17 @@ fn prepare<F: 'static + FnMut()>(mut f: F, timed: bool) -> (usize, *mut u8) {
         stack: Box::new([0; 1024]),
         userdata: Box::new(move || {
             gic::init();
+            crate::UART.map(|u| u.write_bytes(b"before something \n"));
             f();
+            crate::UART.map(|u| u.write_bytes(b"after hahah\n"));
+            hold.as_ref().map(|h| {
+                while
+                    h.compare_exchange(false, false, Ordering::SeqCst, Ordering::SeqCst)
+                    != Ok(false)
+                {}
+            });
+            crate::UART.map(|u| u.write_bytes(b"after 2 hahah\n"));
+
             loop {
                 let new_used_cpus = used_cpus & !(0b1 << next_cpu);
                 if let Err(uc) = USED_CPUS.compare_exchange(
@@ -68,36 +79,41 @@ fn prepare<F: 'static + FnMut()>(mut f: F, timed: bool) -> (usize, *mut u8) {
                     break;
                 }
             }
-            if !timed {
-                unsafe { cpu_off(next_cpu); }
-            }
+            unsafe { cpu_off(); }
         }),
     }));
     (next_cpu, conf as *mut _)
 }
 
 pub fn spawn<F: 'static + FnMut()>(f: F) {
-    let (next_cpu, conf) = prepare(f, false);
+    let (next_cpu, conf) = prepare(f, None);
     unsafe { cpu_on(next_cpu, conf as *mut _); }
 }
 
+#[derive(Debug)]
 pub struct Task {
-    cpu: usize,
+    pub cpu: usize,
     pub alive_until: u64, // until this tick, cpu_off(core), to remove termination channel, no unsafe {
+    pub hold: Arc<AtomicBool>,
 }
 
-pub fn launch<F: 'static + FnMut()>(arena: Arena, lifetime: Duration, f: F) {
-    let (next_cpu, conf) = prepare(f, true);
+impl Task {
+    pub fn new(cpu: usize, lifetime: Duration, hold: Arc<AtomicBool>) -> Self {
+        let alive_until = timer::current_ticks() + timer::convert_to_ticks(lifetime);
+        Self { cpu, alive_until, hold }
+    }
+}
+
+pub fn launch<F: 'static + FnMut()>(arena: Option<Arena>, lifetime: Duration, f: F) {
+    let hold = Arc::new(AtomicBool::new(true));
+    let (next_cpu, conf) = prepare(f, Some(Arc::clone(&hold)));
     unsafe { cpu_on(next_cpu, conf as *mut _); }
-    let task = Task {
-        cpu: next_cpu,
-        alive_until: timer::current_ticks() + timer::convert_to_ticks(lifetime)
-    };
+    let task = Task::new(next_cpu, lifetime, hold);
     exception::interrupt_disable();
     TASK_LIST.map(|t| {
         t.push(task);
         t.sort_by(|a, b| {
-            a.alive_until.partial_cmp(&b.alive_until).unwrap()
+            b.alive_until.partial_cmp(&a.alive_until).unwrap()
         })
     });
     exception::interrupt_enable();

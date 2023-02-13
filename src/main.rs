@@ -228,6 +228,22 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     #[cfg(test)]
     test_main();
 
+
+    for _ in 0..6 {
+        thread::launch(None, core::time::Duration::from_secs(2), || {
+        // thread::spawn(|| {
+            // loop {
+            UART.map(|uart| {
+                let _ = write!(uart, "Running from core {}\n", utils::current_core());
+            });
+            // unsafe { thread::cpu_off(1); }
+            // }
+            loop {}
+        });
+    }
+    // unsafe { thread::cpu_off(1); }
+
+
     // exception::interrupt_disable();
 
     // unsafe {

@@ -3,6 +3,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use core::time;
 use crate::gic::GIC;
 use crate::TASK_LIST;
+use crate::thread::cpu_off;
 
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
 const SYS_FREQ: u32 = 62_500_000; // 62.5 MHz
@@ -36,31 +37,35 @@ pub fn convert_to_ticks(duration: time::Duration) -> u64 {
     duration.as_millis() as u64 / 1000 * TIMER_FREQ as u64
 }
 
+pub fn spin_wait(duration: time::Duration) {
+    let ticks = current_ticks() + convert_to_ticks(duration);
+    while TICK_COUNT
+        .compare_exchange(ticks, ticks, Ordering::SeqCst, Ordering::SeqCst)
+        != Ok(ticks)
+    {}
+}
+
+use core::fmt::Write;
 pub fn tick() {
     let count = TICK_COUNT.fetch_add(1, Ordering::SeqCst);
     if count % 4 == 0 {
-        // TODO check time
+        TASK_LIST.map(|t| {
+            while let Some(task) = t.pop() {
+                if task.alive_until <= count {
+                    task.hold.store(false, Ordering::Relaxed);
+                } else {
+                    t.push(task);
+                    break;
+                }
+            }
+        });
     }
-    reset_tval()
+    tick_tail()
 }
 
-fn reset_tval() {
+fn tick_tail() {
     unsafe {
         asm!("msr CNTP_TVAL_EL0, {:x}",
              in(reg) TIMER_TVAL);
     }
 }
-
-// pub fn read_regs() {
-    // let mut i: u32;
-    // unsafe {
-        // asm!(
-            // "msr CNTP_TVAL_EL0, {:x}",
-            // // "isb",
-            // "mrs {:x}, CNTFRQ_EL0",
-            // in(reg) 62500000,
-            // out(reg) i);
-    // }
-   // use core::fmt::Write;
-    // crate::UART.map(|u| writeln!(u, "{:?}", i));
-// }
