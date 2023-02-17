@@ -99,13 +99,13 @@ static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::Loc
 
 static TASK_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
 
-static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
+const APP_ENABLE: bool = false;
 
 #[no_mangle]
 pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     gic::init();
 
-    // static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
+    static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
     static BLK: mutex::Mutex<Option<virtio::VirtIOBlk>> = mutex::Mutex::new(None);
     static ENTROPY: mutex::Mutex<Option<virtio::VirtIOEntropy>> = mutex::Mutex::new(None);
@@ -228,38 +228,15 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     #[cfg(test)]
     test_main();
 
-
-    for _ in 0..6 {
-        thread::launch(None, core::time::Duration::from_secs(2), || {
-        // thread::spawn(|| {
-            // loop {
+    for i in 0..10 {
+        thread::launch(None, core::time::Duration::from_secs(1), move || {
             UART.map(|uart| {
-                let _ = write!(uart, "Running from core {}\n", utils::current_core());
+                let _ = write!(uart, "------ {} Running from core {}\n", i, utils::current_core());
             });
-            // unsafe { thread::cpu_off(1); }
-            // }
-            loop {}
         });
     }
-    // unsafe { thread::cpu_off(1); }
 
-
-    // exception::interrupt_disable();
-
-    // unsafe {
-        // let mut a: [u64; 3] = [0; 3];
-        // asm!("mrs {}, TCR_EL1",
-             // // "mrs {}, TCR_EL2",
-             // // "mrs {}, TCR_EL3",
-             // out(reg) a[0],
-             // // out(reg) a[1],
-             // // out(reg) a[2],
-        // );
-        // UART.map(|u| writeln!(u, "hhh {:b}, {:b}, {:b}", a[0], a[1], a[2]));
-    // }
-
-    let run_task = false;
-    if run_task {
+    if APP_ENABLE {
         thread::spawn(|| {
             UART.map(|uart| {
                 let _ = write!(uart, "Running from core {}\n", utils::current_core());

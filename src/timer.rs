@@ -1,9 +1,10 @@
 use core::arch::asm;
 use core::sync::atomic::{AtomicU64, Ordering};
 use core::time;
-use crate::gic::GIC;
+
+use crate::gic::{GIC, self};
 use crate::TASK_LIST;
-use crate::thread::cpu_off;
+use crate::exception::InterruptIndex;
 
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
 const SYS_FREQ: u32 = 62_500_000; // 62.5 MHz
@@ -45,14 +46,14 @@ pub fn spin_wait(duration: time::Duration) {
     {}
 }
 
-use core::fmt::Write;
 pub fn tick() {
     let count = TICK_COUNT.fetch_add(1, Ordering::SeqCst);
     if count % 4 == 0 {
         TASK_LIST.map(|t| {
             while let Some(task) = t.pop() {
                 if task.alive_until <= count {
-                    task.hold.store(false, Ordering::Relaxed);
+                    let irq = InterruptIndex::CPUPowerDown as u32;
+                    gic::signal_soft(irq, task.cpu as u32);
                 } else {
                     t.push(task);
                     break;
@@ -60,10 +61,10 @@ pub fn tick() {
             }
         });
     }
-    tick_tail()
+    reset_timer()
 }
 
-fn tick_tail() {
+fn reset_timer() {
     unsafe {
         asm!("msr CNTP_TVAL_EL0, {:x}",
              in(reg) TIMER_TVAL);

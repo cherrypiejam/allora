@@ -1,6 +1,6 @@
-use crate::{UART, timer, system_off, gic};
-use crate::gic::GIC;
-use core::fmt::Write;
+use crate::{timer, gic};
+use crate::thread::cpu_off_graceful;
+
 use core::arch::asm;
 
 #[derive(Debug)]
@@ -40,22 +40,36 @@ pub struct Frame {
 
 #[derive(Debug)]
 #[repr(u32)]
-enum InterruptIndex {
+pub enum InterruptIndex {
+    CPUPowerDown = 0, // SGI
     Timer = timer::EL1_PHYSICAL_TIMER,
 }
 
+impl InterruptIndex {
+    fn is_soft(interrupt: u32) -> bool {
+        interrupt & !0x0f == 0
+    }
+}
+
 const INTERRUPTS: &[(u32, &dyn Fn(u32, &Frame))] = &[
+    (InterruptIndex::CPUPowerDown as u32, &cpu_power_down_handler),
     (InterruptIndex::Timer as u32, &timer_interrupt_handler),
 ];
 
 #[no_mangle]
 pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
+
     match info.desc {
         Description::CurrentElSPx => match info.kind {
             Kind::IRQ => {
                 for &(irq, handler) in INTERRUPTS.iter() {
                     if gic::is_pending(irq) {
                         handler(irq, frame);
+                        if InterruptIndex::is_soft(irq) {
+                            gic::clear_soft(irq)
+                        } else {
+                            gic::clear(irq);
+                        }
                     }
                 }
             }
@@ -65,10 +79,15 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
     }
 }
 
-fn timer_interrupt_handler(irq: u32, _frame: &Frame) {
-    UART.map(|u| write!(u, "."));
+fn timer_interrupt_handler(_irq: u32, _frame: &Frame) {
+    // UART.map(|u| write!(u, "."));
     timer::tick();
-    gic::clear(irq);
+}
+
+
+fn cpu_power_down_handler(irq: u32, _: &Frame) {
+    gic::clear_soft(irq); // Must send before power off
+    cpu_off_graceful();
 }
 
 
