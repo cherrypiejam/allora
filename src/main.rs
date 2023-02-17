@@ -229,7 +229,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     test_main();
 
     for i in 0..10 {
-        thread::launch(None, core::time::Duration::from_secs(1), move || {
+        thread::launch(None, core::time::Duration::from_millis(1), move || {
             UART.map(|uart| {
                 let _ = write!(uart, "------ {} Running from core {}\n", i, utils::current_core());
             });

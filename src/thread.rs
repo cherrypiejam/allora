@@ -91,8 +91,10 @@ pub fn cpu_off_graceful() {
 pub fn spawn<F: 'static + FnMut()>(f: F) {
     let (next_cpu, conf) = prepare(f, false);
     unsafe {
-        let ret = cpu_on(next_cpu, conf as *mut _);
-        assert_eq!(ret, 0);
+        while // TODO handle all corner cases
+            cpu_on(next_cpu, conf as *mut _)
+            != -4
+        {}
     }
 }
 
@@ -112,8 +114,10 @@ pub fn launch<F: 'static + FnMut()>(arena: Option<Arena>, lifetime: Duration, f:
     let (next_cpu, conf) = prepare(f, true);
     let task = Task::new(next_cpu, lifetime);
     unsafe {
-        let ret = cpu_on(next_cpu, conf as *mut _);
-        assert_eq!(ret, 0);
+        while
+            cpu_on(next_cpu, conf as *mut _)
+            != -4
+        {}
     }
     exception::interrupt_disable();
     TASK_LIST.map(|t| {
