@@ -3,10 +3,11 @@ use core::fmt::Write;
 use core::mem;
 use core::ptr;
 use core::ptr::NonNull;
-use core::alloc::Layout;
+use core::alloc::{Layout, Allocator, GlobalAlloc, AllocError};
+
+use crate::mutex::Mutex;
 
 type ChunkLink = Option<NonNull<Chunk>>;
-
 
 fn align_up(addr: usize, align: usize) -> usize {
     assert_eq!(align & (align - 1), 0); // Assume a power of 2 align
@@ -59,7 +60,7 @@ struct ChunkList {
 }
 
 impl ChunkList {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self { head: None }
     }
 
@@ -126,15 +127,16 @@ impl ChunkList {
     }
 }
 
-
 pub struct Arena {
     chunk_list: ChunkList,
     heap_start: usize,
     heap_size: usize,
 }
 
+unsafe impl Send for Arena {}
+
 impl Arena {
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
             chunk_list: ChunkList::new(),
             heap_start: 0,
@@ -146,7 +148,7 @@ impl Arena {
         self.chunk_list.push_region(heap_start, heap_size)
     }
 
-    fn allocate_first_fit(&mut self, size: usize, align: usize, uart: &mut crate::uart::UART) -> Option<NonNull<u8>> {
+    fn allocate_first_fit(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         self.chunk_list
             .pop_first_fit(size, align)
             .map(|(chunk, addr)| {
@@ -162,32 +164,29 @@ impl Arena {
             })
     }
 
-    unsafe fn allocate(&mut self, layout: Layout, uart: &mut crate::uart::UART) -> *mut u8 {
+    fn allocate(&mut self, layout: Layout) -> Option<NonNull<u8>> {
         let layout = layout
             .align_to(mem::align_of::<Chunk>())
             .unwrap()
             .pad_to_align();
         let size = layout.size().max(mem::size_of::<Chunk>());
         let align = layout.align();
-        match self.allocate_first_fit(size, align, uart) {
-            Some(ptr) => ptr.as_ptr(),
-            None => ptr::null_mut(),
-        }
+        self.allocate_first_fit(size, align)
     }
 
-    unsafe fn deallocate(&mut self, ptr: *mut u8, layout: Layout) {
+    unsafe fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) {
         let size = layout
             .align_to(mem::align_of::<Chunk>())
             .unwrap()
             .pad_to_align()
             .size()
             .max(mem::size_of::<Chunk>());
-        self.chunk_list.push_region(ptr as usize, size)
+        self.chunk_list.push_region(ptr.as_ptr() as usize, size)
     }
 
     fn split(&mut self, size: usize, uart: &mut crate::uart::UART) -> Option<Arena> {
         // Only look for the entire chunk of data
-        self.allocate_first_fit(size, mem::align_of::<Chunk>(), uart)
+        self.allocate_first_fit(size, mem::align_of::<Chunk>())
             .map(|ptr| unsafe {
                 let mut arena = Arena::empty();
                 arena.init(ptr.as_ptr() as usize, size);
@@ -199,6 +198,44 @@ impl Arena {
         if let Some(chunk) = arena.chunk_list.head {
             self.chunk_list.push(chunk)
         }
+    }
+}
+
+
+pub type LockedArena = Mutex<Arena>;
+    // let a: Vec<usize, &FOO> = Vec::new_in(&FOO{});
+
+impl LockedArena {
+    pub const fn empty() -> Self {
+        Mutex::new(Arena::empty())
+    }
+}
+
+unsafe impl Allocator for LockedArena {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.lock()
+            .allocate(layout)
+            .map(|p| NonNull::slice_from_raw_parts(p, layout.size()))
+            .ok_or_else(|| AllocError)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        self.lock()
+            .deallocate(ptr, layout)
+    }
+}
+
+unsafe impl GlobalAlloc for LockedArena {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.lock()
+            .allocate(layout)
+            .map(|p| p.as_ptr())
+            .unwrap_or_else(|| ptr::null_mut())
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        self.lock()
+            .deallocate(NonNull::new_unchecked(ptr), layout)
     }
 }
 
@@ -223,8 +260,8 @@ mod test {
             let mut arena = init_arena();
             let layout = Layout::from_size_align(100, 1).unwrap();
             for _ in 0..10000 {
-                let p = arena.allocate(layout, uart);
-                assert!(!p.is_null());
+                let p = arena.allocate(layout);
+                assert!(p.is_some());
             }
         }
     }
@@ -237,12 +274,12 @@ mod test {
             let layout = Layout::from_size_align(100, 1).unwrap();
             let mut plist: [*mut u8; 1000] = mem::MaybeUninit::uninit().assume_init();
             for elem in plist.iter_mut() {
-                let p = arena.allocate(layout, uart);
-                assert!(!p.is_null());
-                ptr::write(elem, p);
+                let p = arena.allocate(layout);
+                assert!(p.is_some());
+                ptr::write(elem, p.unwrap().as_ptr());
             }
             for elem in plist {
-                arena.deallocate(elem, layout);
+                arena.deallocate(NonNull::new_unchecked(elem), layout);
             }
         }
     }
@@ -259,11 +296,11 @@ mod test {
             let mut arena = init_arena();
             let layout = Layout::from_size_align(100, 1).unwrap();
             // stuck this line
-            let plist = [{writeln!(uart, "1"); let p = arena.allocate(layout, uart); writeln!(uart, "1"); p}; 10000];
+            let plist = [{writeln!(uart, "1"); let p = arena.allocate(layout); writeln!(uart, "1"); p}; 10000];
             writeln!(uart, "plist: {}", plist.len());
             for p in plist {
-                writeln!(uart, "p: {}", *p as usize);
-                arena.deallocate(p, layout);
+                writeln!(uart, "p: {}", *p.unwrap().as_ptr() as usize);
+                arena.deallocate(p.unwrap(), layout);
             }
         }
     }
