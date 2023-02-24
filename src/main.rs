@@ -2,6 +2,7 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 #![feature(allocator_api, nonnull_slice_from_raw_parts)]
+#![feature(pointer_is_aligned)]
 
 #![feature(custom_test_frameworks)]
 #![test_runner(test_runner)]
@@ -23,6 +24,7 @@ mod apps;
 mod arena;
 mod exception;
 mod timer;
+mod label;
 
 use virtio::VirtIORegs;
 
@@ -96,10 +98,11 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 }
 
 #[global_allocator]
-static ALLOCATOR: arena::LockedArena = arena::LockedArena::empty();
-// static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
+// static ALLOCATOR: arena::LockedArena = arena::LockedArena::empty();
+static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
 static TASK_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
+static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
 const APP_ENABLE: bool = false;
 
@@ -107,7 +110,7 @@ const APP_ENABLE: bool = false;
 pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     gic::init();
 
-    static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
+    // static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
     static BLK: mutex::Mutex<Option<virtio::VirtIOBlk>> = mutex::Mutex::new(None);
     static ENTROPY: mutex::Mutex<Option<virtio::VirtIOEntropy>> = mutex::Mutex::new(None);
@@ -290,11 +293,15 @@ fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Testable]) {
-    let mut uart = unsafe { uart::UART::new(0x0900_0000 as _, gic::GIC::new(uart::IRQ)) };
-    for test in tests {
-        test.run(&mut uart);
-    }
-    unsafe { system_off() }
+    use exception::InterruptDisabled;
+    InterruptDisabled::with(|| {
+        // It is single threaded anyway, let's disable interrupts.
+        let mut uart = unsafe { uart::UART::new(0x0900_0000 as _, gic::GIC::new(uart::IRQ)) };
+        for test in tests {
+            test.run(&mut uart);
+        }
+        unsafe { system_off() }
+    });
 }
 
 trait Testable {

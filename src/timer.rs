@@ -9,7 +9,7 @@ use crate::exception::InterruptIndex;
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
 const SYS_FREQ: u32 = 62_500_000; // 62.5 MHz
 
-const TIMER_FREQ: u32 = 100;
+const TIMER_FREQ: u32 = 1000;
 const TIMER_TVAL: u32 = SYS_FREQ / TIMER_FREQ;
 
 static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -38,6 +38,7 @@ pub fn convert_to_ticks(duration: time::Duration) -> u64 {
     duration.as_millis() as u64 / 1000 * TIMER_FREQ as u64
 }
 
+#[allow(unused)]
 pub fn spin_wait(duration: time::Duration) {
     let ticks = current_ticks() + convert_to_ticks(duration);
     while TICK_COUNT

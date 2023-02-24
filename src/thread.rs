@@ -3,9 +3,10 @@ use core::sync::atomic::{AtomicU16, Ordering};
 use core::time::Duration;
 use core::arch::asm;
 
-use crate::{gic, timer, exception, TASK_LIST};
+use crate::{gic, timer, TASK_LIST};
 use crate::utils::current_core;
 use crate::arena::Arena;
+use crate::exception::{self, InterruptDisabled};
 
 #[repr(C)]
 struct Thread<T: Sized> {
@@ -98,6 +99,7 @@ pub fn spawn<F: 'static + FnMut()>(f: F) {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Task {
     pub cpu: usize,
     pub alive_until: u64,
@@ -119,13 +121,14 @@ pub fn launch<F: 'static + FnMut()>(arena: Option<Arena>, lifetime: Duration, f:
             != -4
         {}
     }
-    exception::interrupt_disable();
-    TASK_LIST.map(|t| {
-        t.push(task);
-        t.sort_by(|a, b| {
-            b.alive_until.partial_cmp(&a.alive_until).unwrap()
-        })
+
+    InterruptDisabled::with(|| {
+        TASK_LIST.map(|t| {
+            t.push(task);
+            t.sort_by(|a, b| {
+                b.alive_until.partial_cmp(&a.alive_until).unwrap()
+            })
+        });
     });
-    exception::interrupt_enable();
 }
 

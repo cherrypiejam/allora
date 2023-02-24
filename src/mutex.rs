@@ -49,6 +49,10 @@ impl<T> Mutex<T> {
         {}
         MutexGuard { lock: self }
     }
+
+    pub fn into_inner(self) -> T {
+        self.data.into_inner()
+    }
 }
 
 impl<T> Mutex<Option<T>> {

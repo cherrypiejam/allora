@@ -2,7 +2,9 @@ use crate::{timer, gic};
 use crate::thread::cpu_off_graceful;
 
 use core::arch::asm;
+use core::fmt::Write;
 
+#[allow(unused)]
 #[derive(Debug)]
 #[repr(u16)]
 pub enum Description {
@@ -12,6 +14,7 @@ pub enum Description {
     LowerElAArch32,
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 #[repr(u16)]
 pub enum Kind {
@@ -33,6 +36,7 @@ pub struct Info {
 pub struct Frame {
     pstate: u64,        // Spsr_el1
     address: u64,       // Elr_el1 return address
+    v: [u128; 32],      // SIMD registers
     x: [u64; 29],       // General purpose registers
     frame_pointer: u64, // x29
     link_register: u64, // x30
@@ -56,12 +60,18 @@ const INTERRUPTS: &[(u32, &dyn Fn(u32, &Frame))] = &[
     (InterruptIndex::Timer as u32, &timer_interrupt_handler),
 ];
 
+
 #[no_mangle]
 pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
-
     match info.desc {
         Description::CurrentElSPx => match info.kind {
             Kind::IRQ => {
+                // FIXME: potential issue, an interrupt is triggered
+                // but the info is corrupted.
+                // e.g. <><><><><> 0A { ate: , address: , x: panicked at 'not implemented: Info { kind: qemu-system-aarch64: terminating on signal 2 from pid 76610 (<unknown process>)
+                // heap allocation may use this memory for exception handler?
+                // check the argument passed in the exception handler in exception.S
+                // the argument is corrupted
                 for &(irq, handler) in INTERRUPTS.iter() {
                     if gic::is_pending(irq) {
                         handler(irq, frame);
@@ -73,10 +83,18 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
                     }
                 }
             }
-            _ => unimplemented!("{:?}", info)
+            _ => unimplemented!("u1 {:?}", info)
         }
-        _ => unimplemented!("{:?}", info)
+        _ => unimplemented!("u2 {:?}", info)
     }
+}
+
+unsafe fn dump_memory(ptr: *const u8, size: usize) {
+    (0..size).for_each(|_| {
+        crate::UART.map(|u| {
+            let _ = u.write_fmt(format_args!("{:p}: {:x}\n", ptr, core::ptr::read(ptr)));
+        });
+    })
 }
 
 fn timer_interrupt_handler(_irq: u32, _frame: &Frame) {
@@ -86,7 +104,7 @@ fn timer_interrupt_handler(_irq: u32, _frame: &Frame) {
 
 
 fn cpu_power_down_handler(irq: u32, _: &Frame) {
-    gic::clear_soft(irq); // Must send before power off
+    gic::clear_soft(irq); // Must clear before power off
     cpu_off_graceful();
 }
 
@@ -110,3 +128,16 @@ pub fn interrupt_disable() {
         asm!("msr DAIFSet, 7");
     }
 }
+
+pub struct InterruptDisabled;
+
+impl InterruptDisabled {
+    pub fn with<F: Fn()>(f: F) {
+        interrupt_disable();
+        f();
+        interrupt_enable();
+    }
+}
+
+
+
