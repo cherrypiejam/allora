@@ -2,7 +2,6 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 #![feature(allocator_api, nonnull_slice_from_raw_parts)]
-#![feature(pointer_is_aligned)]
 
 #![feature(custom_test_frameworks)]
 #![test_runner(test_runner)]
@@ -35,6 +34,7 @@ global_asm!(include_str!("exception.S"));
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
+use core::time::Duration;
 
 extern "C" {
     static HEAP_START: usize;
@@ -98,10 +98,12 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 }
 
 #[global_allocator]
-// static ALLOCATOR: arena::LockedArena = arena::LockedArena::empty();
-static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
+static ALLOCATOR: arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
+// static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
 static TASK_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
+static ALLOCATOR_LIST: mutex::Mutex<Option<Vec<arena::LabeledArena>>> = mutex::Mutex::new(None);
+
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
 const APP_ENABLE: bool = false;
@@ -233,8 +235,28 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     #[cfg(test)]
     test_main();
 
+    ALLOCATOR_LIST.lock().replace(Vec::new());
+    ALLOCATOR_LIST.map(|alist| alist.push(arena::LabeledArena::empty(label::Label::High)));
+
     for i in 0..10 {
-        thread::launch(None, core::time::Duration::from_millis(1), move || {
+        use core::alloc::Layout;
+        use arena::PAGE_SIZE;
+
+        // Request parameters
+        let memory   = PAGE_SIZE * 2;
+        let label    = label::Label::High;
+        let lifetime = Duration::from_millis(1);
+        let layout   = Layout::from_size_align(memory, PAGE_SIZE).unwrap();
+
+        // Add requested memory to the label-specific bottom level allocator.
+        // And get an allocator instance from bottom level allocator
+        // Alternatively, we can use use this as an allocator instance.
+        let arena = ALLOCATOR
+            .lock()
+            .split(layout)
+            .map(|a| arena::LabeledArena::from_arena(a, label));
+
+        thread::launch(arena, lifetime, move || {
             UART.map(|uart| {
                 let _ = write!(uart, "------ {} Running from core {}\n", i, utils::current_core());
             });

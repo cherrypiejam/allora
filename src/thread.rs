@@ -5,7 +5,7 @@ use core::arch::asm;
 
 use crate::{gic, timer, TASK_LIST};
 use crate::utils::current_core;
-use crate::arena::Arena;
+use crate::arena::LabeledArena;
 use crate::exception::{self, InterruptDisabled};
 
 #[repr(C)]
@@ -94,7 +94,7 @@ pub fn spawn<F: 'static + FnMut()>(f: F) {
     unsafe {
         while // TODO handle all corner cases
             cpu_on(next_cpu, conf as *mut _)
-            != -4
+            < 0
         {}
     }
 }
@@ -112,13 +112,13 @@ impl Task {
     }
 }
 
-pub fn launch<F: 'static + FnMut()>(arena: Option<Arena>, lifetime: Duration, f: F) {
+pub fn launch<F: 'static + FnMut()>(arena: Option<LabeledArena>, lifetime: Duration, f: F) {
     let (next_cpu, conf) = prepare(f, true);
     let task = Task::new(next_cpu, lifetime);
     unsafe {
         while
             cpu_on(next_cpu, conf as *mut _)
-            != -4
+            < 0
         {}
     }
 

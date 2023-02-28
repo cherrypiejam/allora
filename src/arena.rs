@@ -1,10 +1,13 @@
 #![allow(unused)]
+use core::fmt::Write;
 use core::mem;
 use core::ptr::{self, NonNull};
 use core::alloc::{Layout, Allocator, GlobalAlloc, AllocError};
 
 use crate::mutex::{Mutex, MutexGuard};
 use crate::label::Label;
+
+pub const PAGE_SIZE: usize = 4096;
 
 // Align utils: Must be a power of 2 align
 fn align_down(addr: usize, align: usize) -> usize {
@@ -18,6 +21,7 @@ fn align_up(addr: usize, align: usize) -> usize {
 
 type ChunkLink = Option<NonNull<Chunk>>;
 
+#[derive(Debug)]
 struct Chunk {
     size: usize,
     next: ChunkLink,
@@ -42,7 +46,7 @@ impl Chunk {
     }
 
     fn check_alloc(&self, layout: Layout) -> Option<usize> {
-        let start = align_up(self.start(), mem::align_of::<Chunk>());
+        let start = align_up(self.start(), layout.align());
         let end = self.end();
 
         let available_size = end.checked_sub(start)?;
@@ -55,8 +59,18 @@ impl Chunk {
             None
         }
     }
+
+    fn size_align(layout: Layout) -> Layout {
+        let size = layout.size().max(mem::size_of::<Chunk>());
+        Layout::from_size_align(size, layout.align())
+            .unwrap()
+            .align_to(mem::align_of::<Chunk>())
+            .unwrap()
+            .pad_to_align()
+    }
 }
 
+#[derive(Debug)]
 struct ChunkList {
     head: ChunkLink,
 }
@@ -121,6 +135,7 @@ impl ChunkList {
 
 }
 
+#[derive(Debug)]
 pub struct Arena {
     chunk_list: ChunkList,
     heap_start: usize,
@@ -139,29 +154,19 @@ impl Arena {
     }
 
     pub unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
-        let heap_start = align_up(heap_start, mem::align_of::<Chunk>());
-        let heap_size = align_down(heap_size, mem::align_of::<Chunk>());
-        self.chunk_list.push_region(heap_start, heap_size)
+        self.heap_start = heap_start;
+        self.heap_size = heap_size;
+        self.chunk_list.push_region(heap_start, heap_size);
     }
 
     fn allocate_first_fit(&mut self, layout: Layout) -> Option<NonNull<u8>> {
-        let size = align_up(
-            layout.size().max(mem::size_of::<Chunk>()),
-            mem::align_of::<Chunk>()
-        );
-        let align = layout.align();
-        let new_layout =
-            Layout::from_size_align(size, layout.align())
-                .unwrap()
-                .align_to(mem::align_of::<Chunk>())
-                .unwrap()
-                .pad_to_align();
+        let layout = Chunk::size_align(layout);
         self.chunk_list
-            .pop_first_fit(new_layout)
+            .pop_first_fit(layout)
             .map(|(chunk, addr)| {
-                let new_addr = addr.checked_add(size).unwrap();
+                let new_addr = addr.checked_add(layout.size()).unwrap();
                 unsafe {
-                    let new_size = chunk.as_ref().end().checked_sub(new_addr).unwrap(); // TODO align down
+                    let new_size = chunk.as_ref().end().checked_sub(new_addr).unwrap();
                     self.chunk_list.push_region(new_addr, new_size);
                     NonNull::new(addr as *mut _).unwrap()
                 }
@@ -173,22 +178,15 @@ impl Arena {
     }
 
     unsafe fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) {
-        let size = align_up(
-            layout.size().max(mem::size_of::<Chunk>()),
-            mem::align_of::<Chunk>()
-        );
-        let align = layout.align();
-        let new_layout =
-            Layout::from_size_align(size, align)
-                .unwrap()
-                .align_to(mem::align_of::<Chunk>())
-                .unwrap()
-                .pad_to_align();
-        let size = new_layout.size();
+        let size = Chunk::size_align(layout).size();
         self.chunk_list.push_region(ptr.as_ptr() as usize, size)
     }
 
-    fn split(&mut self, layout: Layout) -> Option<Arena> {
+    pub fn split(&mut self, layout: Layout) -> Option<Arena> {
+        let layout = layout
+            .align_to(PAGE_SIZE)
+            .unwrap()
+            .pad_to_align();
         // Only look for an entire chunk of data
         self.allocate_first_fit(layout)
             .map(|ptr| unsafe {
@@ -198,9 +196,13 @@ impl Arena {
             })
     }
 
-    fn join(&mut self, arena: Arena) {
+    pub fn join(&mut self, arena: Arena) {
         // Inherently take over all memory the arena originally owns,
         // even if the arena got splitted after.
+        // FIXME: If join an arena splited from another arena,
+        // the `heap_start` and `heap_size` won't be updated because
+        // it doesn't technically own that part of the memory.
+        // This may lead to some issues but let's tackle it later.
         unsafe {
             self.chunk_list.push_region(arena.heap_start, arena.heap_size)
         }
@@ -217,12 +219,23 @@ impl LabeledArena {
     pub const fn empty(label: Label) -> Self {
         Self {
             inner: Mutex::new(Arena::empty()),
-            label
+            label,
+        }
+    }
+
+    pub fn from_arena(arena: Arena, label: Label) -> Self {
+        Self {
+            inner: Mutex::new(arena),
+            label,
         }
     }
 
     pub fn lock(&self) -> MutexGuard<Arena> {
         self.inner.lock()
+    }
+
+    pub fn label(&self) -> Label {
+        self.label.clone()
     }
 
     pub fn split(&self, layout: Layout, label: Label) -> Option<LabeledArena> {

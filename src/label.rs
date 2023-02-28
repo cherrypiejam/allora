@@ -6,6 +6,6 @@ pub enum Label {
 
 impl Label {
     pub fn can_flow_to(&self, rhs: &Label) -> bool {
-        self < rhs
+        self <= rhs
     }
 }
