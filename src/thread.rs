@@ -8,25 +8,6 @@ use crate::utils::current_core;
 use crate::arena::LabeledArena;
 use crate::exception::{self, InterruptDisabled};
 
-// struct RawThread {
-    // data: *mut Thread<Box<dyn FnMut()>>,
-// }
-
-// impl From<Box<Thread<Box<dyn FnMut()>>>> for RawThread {
-    // fn from(value: Box<Thread<Box<dyn FnMut()>>>) -> Self {
-        // RawThread { data: Box::into_raw(value) }
-    // }
-// }
-
-// unsafe impl Send for RawThread {}
-
-// pub struct ThreadLocal {
-pub struct ThreadInfo {
-    pub cpu: usize,
-    pub alive_until: u64,
-    arena: Option<LabeledArena>,
-}
-
 #[repr(C)]
 struct Thread<T: Sized> {
     main: extern "C" fn(Box<Self>),
@@ -68,10 +49,6 @@ fn prepare<F: 'static + FnMut()>(mut f: F, arena: Option<LabeledArena>) -> (usiz
         }
     }
 
-    // let info = Box::new(ThreadInfo {
-        // cpu
-    // });
-
     let mut conf = Box::<Thread<Box<dyn FnMut()>>>::new_uninit();
     let conf = unsafe {
         let conf_ptr = conf.as_mut_ptr();
@@ -99,27 +76,6 @@ fn prepare<F: 'static + FnMut()>(mut f: F, arena: Option<LabeledArena>) -> (usiz
         });
         Box::into_raw(conf.assume_init())
     };
-
-    // let conf = Box::into_raw(Box::new(Thread {
-        // main: thread_start,
-        // stack: Box::new([0; 1024]),
-        // userdata: Box::new(move || {
-            // gic::init();
-            // exception::load_table();
-            // // unsafe { gic::GIC::new(0).enable() };
-
-            // f();
-
-            // if !wait_after_finish {
-                // cpu_off_graceful();
-            // } else {
-                // loop {
-                    // unsafe { asm!("wfi"); }
-                // }
-            // }
-        // }),
-    // }));
-
     (next_cpu, conf as *mut _)
 }
 
