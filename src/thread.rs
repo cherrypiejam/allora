@@ -3,7 +3,7 @@ use core::sync::atomic::{AtomicU16, Ordering};
 use core::time::Duration;
 use core::arch::asm;
 
-use crate::{gic, timer, WAIT_LIST};
+use crate::{gic, timer, WAIT_LIST, ALLOCATOR_LIST};
 use crate::utils::current_core;
 use crate::arena::LabeledArena;
 use crate::exception::{self, InterruptDisabled};
@@ -14,6 +14,22 @@ struct Thread<T: Sized> {
     stack: Box<[usize; 1024]>,
     userdata: T,
     arena: Option<LabeledArena>,
+}
+
+impl<T: Sized> Drop for Thread<T> {
+    fn drop(&mut self) {
+        self.arena
+            .take()
+            .map(|arena| {
+                ALLOCATOR_LIST.map(|alist| {
+                    alist.iter()
+                        .find(|a| a.label() == arena.label())
+                        .map(|a| {
+                            a.join(arena);
+                        });
+                });
+            });
+    }
 }
 
 extern "C" {
@@ -80,7 +96,6 @@ fn prepare<F: 'static + FnMut()>(mut f: F, arena: Option<LabeledArena>) -> (usiz
 }
 
 pub fn cpu_off_graceful() {
-    init_thread(0 as *const _);
     let cpu = current_core();
     let mut used_cpus = USED_CPUS.load(Ordering::Relaxed);
     loop {
@@ -96,7 +111,16 @@ pub fn cpu_off_graceful() {
             break;
         }
     }
-    unsafe { cpu_off(); }
+
+    unsafe {
+        current_thread()
+            .map(|curr| {
+                // Drop explicitly. TODO Will it drop stack before cpu_off?
+                drop(Box::from_raw(curr as *mut _))
+            });
+        init_thread(0 as *const _);
+        cpu_off();
+    }
 }
 
 pub fn spawn<F: 'static + FnMut()>(f: F) {
@@ -142,7 +166,6 @@ pub fn launch<F: 'static + FnMut()>(arena: Option<LabeledArena>, lifetime: Durat
     });
 }
 
-
 fn init_thread(conf: *const u8) {
     unsafe {
         asm!("msr TPIDR_EL1, {}",
@@ -150,7 +173,7 @@ fn init_thread(conf: *const u8) {
     }
 }
 
-fn current_thread<'a>() -> Option<&'a Thread<Box<dyn FnMut()>>> {
+fn current_thread<'a>() -> Option<&'a mut Thread<Box<dyn FnMut()>>> {
     let conf: u64;
     unsafe {
         asm!("mrs {}, TPIDR_EL1",
@@ -160,7 +183,7 @@ fn current_thread<'a>() -> Option<&'a Thread<Box<dyn FnMut()>>> {
         None
     } else {
         Some(unsafe {
-            &*(conf as *mut _)
+            &mut *(conf as *mut _)
         })
     }
 }
@@ -171,4 +194,11 @@ pub fn local_arena<'a>() -> Option<&'a LabeledArena> {
             curr.arena.as_ref()
         })
 }
+
+// pub fn local_arena_2() -> Option<LabeledArena> {
+    // current_thread()
+        // .and_then(|curr| {
+            // curr.arena
+        // })
+// }
 

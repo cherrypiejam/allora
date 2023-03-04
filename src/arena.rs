@@ -203,6 +203,12 @@ impl Arena {
         // the `heap_start` and `heap_size` won't be updated because
         // it doesn't technically own that part of the memory.
         // This may lead to some issues but let's tackle it later.
+        // FIXME: Another issue is that if self creates another arena
+        // which is later added to the global arena, when self is added
+        // back to the global arena, the global arena would has a duplicated
+        // chunk. Alternatively, we can push free chunks to the list, but
+        // doing so can cause permanent fragmentations. Even wrose, if we
+        // preempt a thread, we cannot reclaim all the memory.
         unsafe {
             self.chunk_list.push_region(arena.heap_start, arena.heap_size)
         }
