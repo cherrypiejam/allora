@@ -209,7 +209,6 @@ impl Arena {
     }
 }
 
-
 pub struct LabeledArena {
     inner: Mutex<Arena>,
     label: Label,

@@ -34,12 +34,14 @@ pub struct Info {
 #[derive(Debug)]
 #[repr(C)]
 pub struct Frame {
-    pstate: u64,        // Spsr_el1
-    address: u64,       // Elr_el1 return address
-    v: [u128; 32],      // SIMD registers
-    x: [u64; 29],       // General purpose registers
-    frame_pointer: u64, // x29
-    link_register: u64, // x30
+    pstate:        u64,        // SPSR_EL1
+    address:       u64,        // ELR_EL1 return address
+    thread_id:     u64,        // TPIDR_EL1
+    va_table_base: u64,        // TTBR0_EL1
+    v:             [u128; 32], // SIMD registers
+    x:             [u64;  29], // General purpose registers
+    frame_pointer: u64,        // x29
+    link_register: u64,        // x30
 }
 
 #[derive(Debug)]

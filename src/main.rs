@@ -2,6 +2,7 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 #![feature(allocator_api, nonnull_slice_from_raw_parts)]
+#![feature(new_uninit)]
 
 #![feature(custom_test_frameworks)]
 #![test_runner(test_runner)]
@@ -101,7 +102,7 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 static ALLOCATOR: arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
 // static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
-static TASK_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
+static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
 static ALLOCATOR_LIST: mutex::Mutex<Option<Vec<arena::LabeledArena>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
@@ -230,7 +231,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         }
     }
 
-    TASK_LIST.lock().replace(Vec::new());
+    WAIT_LIST.lock().replace(Vec::new());
 
     #[cfg(test)]
     test_main();
@@ -258,7 +259,15 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
 
         thread::launch(arena, lifetime, move || {
             UART.map(|uart| {
-                let _ = write!(uart, "------ {} Running from core {}\n", i, utils::current_core());
+                let arena = thread::local_arena().unwrap();
+                let leet = Box::new_in(i + 1337, arena);
+                let _ = write!(
+                    uart,
+                    "Thread {i}:\n--- Running from core {}, label {:?}, data {}\n",
+                    utils::current_core(),
+                    arena.label(),
+                    leet,
+                );
             });
         });
     }

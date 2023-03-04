@@ -1,4 +1,4 @@
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum Label {
     Low,
     High,

@@ -3,7 +3,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use core::time;
 
 use crate::gic::{GIC, self};
-use crate::TASK_LIST;
+use crate::WAIT_LIST;
 use crate::exception::InterruptIndex;
 
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
@@ -50,7 +50,7 @@ pub fn spin_wait(duration: time::Duration) {
 pub fn tick() {
     let count = TICK_COUNT.fetch_add(1, Ordering::SeqCst);
     if count % 4 == 0 {
-        TASK_LIST.map(|t| {
+        WAIT_LIST.map(|t| {
             while let Some(task) = t.pop() {
                 if task.alive_until <= count {
                     let irq = InterruptIndex::CPUPowerDown as u32;

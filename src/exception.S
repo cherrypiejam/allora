@@ -35,6 +35,10 @@ context_stack:
     stp q2, q3, [sp, -32]!
     stp q0, q1, [sp, -32]!
 
+    mrs x0, TPIDR_EL1
+    mrs x1, TTBR0_EL1
+    stp x0, x1, [sp, -16]!
+
     mrs x0, SPSR_EL1
     mrs x1, ELR_EL1
     stp x0, x1, [sp, -16]!
@@ -45,6 +49,10 @@ context_restore:
     ldp x0, x1, [sp], 16
     msr SPSR_EL1, x0
     msr ELR_EL1, x1
+
+    ldp x0, x1, [sp], 16
+    msr TPIDR_EL1, x0
+    msr TTBR0_EL1, x1
 
     ldp q0, q1, [sp], 32
     ldp q2, q3, [sp], 32

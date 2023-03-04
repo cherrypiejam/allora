@@ -3,16 +3,36 @@ use core::sync::atomic::{AtomicU16, Ordering};
 use core::time::Duration;
 use core::arch::asm;
 
-use crate::{gic, timer, TASK_LIST};
+use crate::{gic, timer, WAIT_LIST};
 use crate::utils::current_core;
 use crate::arena::LabeledArena;
 use crate::exception::{self, InterruptDisabled};
+
+// struct RawThread {
+    // data: *mut Thread<Box<dyn FnMut()>>,
+// }
+
+// impl From<Box<Thread<Box<dyn FnMut()>>>> for RawThread {
+    // fn from(value: Box<Thread<Box<dyn FnMut()>>>) -> Self {
+        // RawThread { data: Box::into_raw(value) }
+    // }
+// }
+
+// unsafe impl Send for RawThread {}
+
+// pub struct ThreadLocal {
+pub struct ThreadInfo {
+    pub cpu: usize,
+    pub alive_until: u64,
+    arena: Option<LabeledArena>,
+}
 
 #[repr(C)]
 struct Thread<T: Sized> {
     main: extern "C" fn(Box<Self>),
     stack: Box<[usize; 1024]>,
     userdata: T,
+    arena: Option<LabeledArena>,
 }
 
 extern "C" {
@@ -26,7 +46,7 @@ extern "C" fn thread_start(mut conf: Box<Thread<Box<dyn FnMut()>>>) {
 
 static USED_CPUS: AtomicU16 = AtomicU16::new(!0b1110);
 
-fn prepare<F: 'static + FnMut()>(mut f: F, wait_after_finish: bool) -> (usize, *mut u8) {
+fn prepare<F: 'static + FnMut()>(mut f: F, arena: Option<LabeledArena>) -> (usize, *mut u8) {
     // Wait until there is a free CPU in the bit map
     let mut used_cpus = USED_CPUS.load(Ordering::Relaxed);
     let mut next_cpu;
@@ -48,29 +68,63 @@ fn prepare<F: 'static + FnMut()>(mut f: F, wait_after_finish: bool) -> (usize, *
         }
     }
 
-    let conf = Box::into_raw(Box::new(Thread {
-        main: thread_start,
-        stack: Box::new([0; 1024]),
-        userdata: Box::new(move || {
-            gic::init();
-            exception::load_table();
-            // unsafe { gic::GIC::new(0).enable() };
+    // let info = Box::new(ThreadInfo {
+        // cpu
+    // });
 
-            f();
+    let mut conf = Box::<Thread<Box<dyn FnMut()>>>::new_uninit();
+    let conf = unsafe {
+        let conf_ptr = conf.as_mut_ptr();
+        conf_ptr.write(Thread {
+            main: thread_start,
+            stack: Box::new([0; 1024]),
+            userdata: Box::new(move || {
+                gic::init();
+                exception::load_table();
+                init_thread(conf_ptr as *const _);
+                // unsafe { gic::GIC::new(0).enable() };
 
-            if !wait_after_finish {
-                cpu_off_graceful();
-            } else {
-                loop {
-                    unsafe { asm!("wfi"); }
+                f();
+
+                if local_arena().is_none() {
+                    // TODO To terminate early, we first need to remove the
+                    // task from the wait list. This is currently only handled
+                    // by the interrupt handler.
+                    cpu_off_graceful();
+                } else {
+                    loop { asm!("wfi"); }
                 }
-            }
-        }),
-    }));
+            }),
+            arena,
+        });
+        Box::into_raw(conf.assume_init())
+    };
+
+    // let conf = Box::into_raw(Box::new(Thread {
+        // main: thread_start,
+        // stack: Box::new([0; 1024]),
+        // userdata: Box::new(move || {
+            // gic::init();
+            // exception::load_table();
+            // // unsafe { gic::GIC::new(0).enable() };
+
+            // f();
+
+            // if !wait_after_finish {
+                // cpu_off_graceful();
+            // } else {
+                // loop {
+                    // unsafe { asm!("wfi"); }
+                // }
+            // }
+        // }),
+    // }));
+
     (next_cpu, conf as *mut _)
 }
 
 pub fn cpu_off_graceful() {
+    init_thread(0 as *const _);
     let cpu = current_core();
     let mut used_cpus = USED_CPUS.load(Ordering::Relaxed);
     loop {
@@ -90,7 +144,7 @@ pub fn cpu_off_graceful() {
 }
 
 pub fn spawn<F: 'static + FnMut()>(f: F) {
-    let (next_cpu, conf) = prepare(f, false);
+    let (next_cpu, conf) = prepare(f, None);
     unsafe {
         while // TODO handle all corner cases
             cpu_on(next_cpu, conf as *mut _)
@@ -113,7 +167,7 @@ impl Task {
 }
 
 pub fn launch<F: 'static + FnMut()>(arena: Option<LabeledArena>, lifetime: Duration, f: F) {
-    let (next_cpu, conf) = prepare(f, true);
+    let (next_cpu, conf) = prepare(f, arena);
     let task = Task::new(next_cpu, lifetime);
     unsafe {
         while
@@ -123,12 +177,42 @@ pub fn launch<F: 'static + FnMut()>(arena: Option<LabeledArena>, lifetime: Durat
     }
 
     InterruptDisabled::with(|| {
-        TASK_LIST.map(|t| {
-            t.push(task);
-            t.sort_by(|a, b| {
+        WAIT_LIST.map(|wlist| {
+            wlist.push(task);
+            wlist.sort_by(|a, b| {
                 b.alive_until.partial_cmp(&a.alive_until).unwrap()
             })
         });
     });
+}
+
+
+fn init_thread(conf: *const u8) {
+    unsafe {
+        asm!("msr TPIDR_EL1, {}",
+             in(reg) conf as u64);
+    }
+}
+
+fn current_thread<'a>() -> Option<&'a Thread<Box<dyn FnMut()>>> {
+    let conf: u64;
+    unsafe {
+        asm!("mrs {}, TPIDR_EL1",
+             out(reg) conf);
+    }
+    if conf == 0 {
+        None
+    } else {
+        Some(unsafe {
+            &*(conf as *mut _)
+        })
+    }
+}
+
+pub fn local_arena<'a>() -> Option<&'a LabeledArena> {
+    current_thread()
+        .and_then(|curr| {
+            curr.arena.as_ref()
+        })
 }
 
