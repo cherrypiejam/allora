@@ -244,7 +244,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         use arena::PAGE_SIZE;
 
         // Request parameters
-        let memory   = PAGE_SIZE * 2;
+        let memory   = PAGE_SIZE * 5;
         let label    = label::Label::High;
         let lifetime = Duration::from_millis(1);
         let layout   = Layout::from_size_align(memory, PAGE_SIZE).unwrap();

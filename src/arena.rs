@@ -260,7 +260,7 @@ impl LabeledArena {
     }
 }
 
-unsafe impl Allocator for LabeledArena {
+unsafe impl<'a> Allocator for &'a LabeledArena {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         self.lock()
             .allocate(layout)
@@ -270,6 +270,35 @@ unsafe impl Allocator for LabeledArena {
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         self.lock()
+            .deallocate(ptr, layout)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RawLabeledArena(NonNull<LabeledArena>);
+
+impl From<&LabeledArena> for RawLabeledArena {
+    fn from(value: &LabeledArena) -> Self {
+        unsafe {
+            Self(NonNull::new_unchecked(value as *const _ as *mut _))
+        }
+    }
+}
+
+unsafe impl Allocator for RawLabeledArena {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let arena = unsafe { self.0.as_ref() };
+        arena
+            .lock()
+            .allocate(layout)
+            .map(|p| NonNull::slice_from_raw_parts(p, layout.size()))
+            .ok_or_else(|| AllocError)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        let arena = unsafe { self.0.as_ref() };
+        arena
+            .lock()
             .deallocate(ptr, layout)
     }
 }

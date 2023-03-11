@@ -2,21 +2,25 @@ use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU16, Ordering};
 use core::time::Duration;
 use core::arch::asm;
+use core::mem;
+use core::ptr;
 
-use crate::{gic, timer, WAIT_LIST, ALLOCATOR_LIST};
+// use core::marker::PhantomPinned;
+
+use crate::{gic, timer, WAIT_LIST, ALLOCATOR, ALLOCATOR_LIST};
 use crate::utils::current_core;
-use crate::arena::LabeledArena;
+use crate::arena::{LabeledArena, RawLabeledArena};
 use crate::exception::{self, InterruptDisabled};
 
 #[repr(C)]
 struct Thread<T: Sized> {
     main: extern "C" fn(Box<Self>),
-    stack: Box<[usize; 1024]>,
+    stack: Box<[usize; 1024], RawLabeledArena>,
     userdata: T,
     arena: Option<LabeledArena>,
 }
 
-impl<T: Sized> Drop for Thread<T> {
+impl<'a, T: Sized> Drop for Thread<T> {
     fn drop(&mut self) {
         self.arena
             .take()
@@ -37,7 +41,7 @@ extern "C" {
     fn cpu_off();
 }
 
-extern "C" fn thread_start(mut conf: Box<Thread<Box<dyn FnMut()>>>) {
+extern "C" fn thread_start(mut conf: Box<Thread<Box<dyn FnMut(), RawLabeledArena>>>) {
     (conf.userdata)()
 }
 
@@ -65,32 +69,44 @@ fn prepare<F: 'static + FnMut()>(mut f: F, arena: Option<LabeledArena>) -> (usiz
         }
     }
 
-    let mut conf = Box::<Thread<Box<dyn FnMut()>>>::new_uninit();
-    let conf = unsafe {
-        let conf_ptr = conf.as_mut_ptr();
-        conf_ptr.write(Thread {
+    let conf = {
+        // It is OK to put conf on the global heap.
+        let mut conf = Box::new(Thread {
             main: thread_start,
-            stack: Box::new([0; 1024]),
-            userdata: Box::new(move || {
-                gic::init();
-                exception::load_table();
-                init_thread(conf_ptr as *const _);
-                // unsafe { gic::GIC::new(0).enable() };
-
-                f();
-
-                if local_arena().is_none() {
-                    // TODO To terminate early, we first need to remove the
-                    // task from the wait list. This is currently only handled
-                    // by the interrupt handler.
-                    cpu_off_graceful();
-                } else {
-                    loop { asm!("wfi"); }
-                }
-            }),
+            stack: unsafe {
+                let boxed = mem::MaybeUninit::<Box<[usize; 1024], RawLabeledArena>>::uninit();
+                boxed.assume_init()
+            },
+            userdata: unsafe {
+                let boxed = mem::MaybeUninit::<Box<dyn FnMut(), RawLabeledArena>>::uninit();
+                boxed.assume_init()
+            },
             arena,
         });
-        Box::into_raw(conf.assume_init())
+        let raw_conf = conf.as_mut() as *mut _;
+        let raw_arena = RawLabeledArena::from(conf.arena.as_ref().unwrap_or_else(|| &ALLOCATOR));
+        let stack = Box::new_in([0; 1024], raw_arena);
+        let userdata = Box::new_in(move || {
+            gic::init();
+            exception::load_table();
+            init_thread(raw_conf as *const _);
+            f();
+            if local_arena().is_none() {
+                // TODO To terminate early, we first need to remove the
+                // task from the wait list. This is currently only handled
+                // by the interrupt handler.
+                cpu_off_graceful();
+            } else {
+                loop { unsafe { asm!("wfi"); } }
+            }
+        }, raw_arena);
+
+        unsafe {
+            ptr::write(&mut conf.stack, stack);
+            ptr::write(&mut conf.userdata, userdata);
+        }
+
+        Box::into_raw(conf)
     };
     (next_cpu, conf as *mut _)
 }
@@ -115,8 +131,7 @@ pub fn cpu_off_graceful() {
     unsafe {
         current_thread()
             .map(|curr| {
-                // Drop explicitly. TODO Will it drop stack before cpu_off?
-                drop(Box::from_raw(curr as *mut _))
+                drop(Box::from_raw(curr as *mut _)) // drop explicitly
             });
         init_thread(0 as *const _);
         cpu_off();
@@ -173,7 +188,7 @@ fn init_thread(conf: *const u8) {
     }
 }
 
-fn current_thread<'a>() -> Option<&'a mut Thread<Box<dyn FnMut()>>> {
+fn current_thread<'a>() -> Option<&'a mut Thread<Box<dyn FnMut(), RawLabeledArena>>> {
     let conf: u64;
     unsafe {
         asm!("mrs {}, TPIDR_EL1",
@@ -194,11 +209,3 @@ pub fn local_arena<'a>() -> Option<&'a LabeledArena> {
             curr.arena.as_ref()
         })
 }
-
-// pub fn local_arena_2() -> Option<LabeledArena> {
-    // current_thread()
-        // .and_then(|curr| {
-            // curr.arena
-        // })
-// }
-
