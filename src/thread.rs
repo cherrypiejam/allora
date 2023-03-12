@@ -91,14 +91,7 @@ fn prepare<F: 'static + FnMut()>(mut f: F, arena: Option<LabeledArena>) -> (usiz
             exception::load_table();
             init_thread(raw_conf as *const _);
             f();
-            if local_arena().is_none() {
-                // TODO To terminate early, we first need to remove the
-                // task from the wait list. This is currently only handled
-                // by the interrupt handler.
-                cpu_off_graceful();
-            } else {
-                loop { unsafe { asm!("wfi"); } }
-            }
+            cpu_off_graceful(); // early-termination channel
         }, raw_arena);
 
         unsafe {
@@ -112,6 +105,10 @@ fn prepare<F: 'static + FnMut()>(mut f: F, arena: Option<LabeledArena>) -> (usiz
 }
 
 pub fn cpu_off_graceful() {
+    InterruptDisabled::with(|| {
+        WAIT_LIST.map(|wlist| wlist.retain(|w| w.cpu != current_core()));
+    });
+
     let cpu = current_core();
     let mut used_cpus = USED_CPUS.load(Ordering::Relaxed);
     loop {

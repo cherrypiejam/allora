@@ -62,7 +62,6 @@ const INTERRUPTS: &[(u32, &dyn Fn(u32, &Frame))] = &[
     (InterruptIndex::Timer as u32, &timer_interrupt_handler),
 ];
 
-
 #[no_mangle]
 pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
     match info.desc {
@@ -91,25 +90,15 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
     }
 }
 
-unsafe fn dump_memory(ptr: *const u8, size: usize) {
-    (0..size).for_each(|_| {
-        crate::UART.map(|u| {
-            let _ = u.write_fmt(format_args!("{:p}: {:x}\n", ptr, core::ptr::read(ptr)));
-        });
-    })
-}
-
 fn timer_interrupt_handler(_irq: u32, _frame: &Frame) {
     // UART.map(|u| write!(u, "."));
     timer::tick();
 }
 
-
 fn cpu_power_down_handler(irq: u32, _: &Frame) {
     gic::clear_soft(irq); // Must clear before power off
     cpu_off_graceful();
 }
-
 
 pub fn load_table() {
     unsafe {
@@ -141,5 +130,11 @@ impl InterruptDisabled {
     }
 }
 
-
-
+#[allow(dead_code)]
+unsafe fn dump_memory(ptr: *const u8, size: usize) {
+    (0..size).for_each(|_| {
+        crate::UART.map(|u| {
+            let _ = u.write_fmt(format_args!("{:p}: {:x}\n", ptr, core::ptr::read(ptr)));
+        });
+    })
+}
