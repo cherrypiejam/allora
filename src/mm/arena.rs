@@ -6,18 +6,10 @@ use core::alloc::{Layout, Allocator, GlobalAlloc, AllocError};
 
 use crate::mutex::{Mutex, MutexGuard};
 use crate::label::Label;
+use crate::bitmap::Bitmap;
 
-pub const PAGE_SIZE: usize = 4096;
-
-// Align utils: Must be a power of 2 align
-fn align_down(addr: usize, align: usize) -> usize {
-    assert_eq!(align & (align - 1), 0);
-    addr & !(align - 1)
-}
-
-fn align_up(addr: usize, align: usize) -> usize {
-    align_down(addr + (align - 1), align)
-}
+use super::PAGE_SIZE;
+use super::utils::{align_up, align_down};
 
 type ChunkLink = Option<NonNull<Chunk>>;
 
@@ -228,7 +220,7 @@ impl LabeledArena {
         }
     }
 
-    pub fn from_arena(arena: Arena, label: Label) -> Self {
+    pub fn new(arena: Arena, label: Label) -> Self {
         Self {
             inner: Mutex::new(arena),
             label,
@@ -331,7 +323,7 @@ mod test {
     }
 
     #[test_case]
-    fn test_alloc(uart: &mut uart::UART) {
+    fn test_alloc() {
         unsafe {
             let mut arena = init_arena();
             let layout = Layout::from_size_align(100, 1).unwrap();
@@ -344,7 +336,7 @@ mod test {
 
     #[test_case]
     #[allow(invalid_value)]
-    fn test_dealloc(uart: &mut uart::UART) {
+    fn test_dealloc() {
         unsafe {
             let mut arena = init_arena();
             let layout = Layout::from_size_align(100, 1).unwrap();
@@ -361,28 +353,28 @@ mod test {
     }
 
     // #[test_case]
-    fn test_buggy(_: &mut uart::UART) {
-        let a = [1; 100000];
-        for b in a.iter() {}
-    }
+    // fn test_buggy() {
+        // let a = [1; 100000];
+        // for b in a.iter() {}
+    // }
 
     // #[test_case]
-    #[allow(invalid_value)]
-    fn test_buggy_iter_if_timer_enabled(uart: &mut uart::UART) {
-        // A possible explaination is that some memory copy operations
-        // got corrupted during a context switch.
-        struct FOO {
-            a: Option<u64>,
-            b: u64,
-        }
-        let mut arena_list: [FOO; 1000] = unsafe {
-            mem::MaybeUninit::uninit().assume_init()
-        };
-        let a = core::array::IntoIter::new(arena_list); // Stuck at here
-    }
+    // #[allow(invalid_value)]
+    // fn test_buggy_iter_if_timer_enabled() {
+        // // A possible explaination is that some memory copy operations
+        // // got corrupted during a context switch.
+        // struct FOO {
+            // a: Option<u64>,
+            // b: u64,
+        // }
+        // let mut arena_list: [FOO; 1000] = unsafe {
+            // mem::MaybeUninit::uninit().assume_init()
+        // };
+        // let a = core::array::IntoIter::new(arena_list); // Stuck at here
+    // }
 
     #[test_case]
-    fn test_split_merge_on_demand(uart: &mut uart::UART) {
+    fn test_split_merge_on_demand() {
         unsafe {
             let mut arena = init_arena();
             for _ in 0..1000 {
@@ -411,17 +403,4 @@ mod test {
             }
         }
     }
-
-    // #[test_case]
-    // fn teest_alloc(uart: &mut uart::UART) {
-        // unsafe {
-            // let mut arena = init_arena();
-            // let layout = Layout::from_size_align(100, 1).unwrap();
-            // for _ in 0..10000 {
-                // let p = arena.allocate(layout);
-                // assert!(p.is_some());
-            // }
-        // }
-    // }
-
 }

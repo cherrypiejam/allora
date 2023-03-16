@@ -84,9 +84,9 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
                     }
                 }
             }
-            _ => unimplemented!("u1 {:?}", info)
+            _ => unimplemented!("kind {:?}", info)
         }
-        _ => unimplemented!("u2 {:?}", info)
+        _ => unimplemented!("desc {:?}", info)
     }
 }
 

@@ -21,10 +21,11 @@ pub mod utils;
 pub mod virtio;
 
 mod apps;
-mod arena;
+mod mm;
 mod exception;
 mod timer;
 mod label;
+mod bitmap;
 
 use virtio::VirtIORegs;
 
@@ -36,6 +37,8 @@ use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
 use core::time::Duration;
+
+use mm::arena;
 
 extern "C" {
     static HEAP_START: usize;
@@ -99,7 +102,7 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 }
 
 #[global_allocator]
-static ALLOCATOR: arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
+static ALLOCATOR: mm::arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
 // static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
 static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
@@ -118,6 +121,9 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     static BLK: mutex::Mutex<Option<virtio::VirtIOBlk>> = mutex::Mutex::new(None);
     static ENTROPY: mutex::Mutex<Option<virtio::VirtIOEntropy>> = mutex::Mutex::new(None);
     static NET: mutex::Mutex<Option<virtio::VirtIONet>> = mutex::Mutex::new(None);
+
+    let mut hstart = 0;
+    let mut hsize = 0;
 
     if let Some(root) = dtb.root() {
         let size_cell = root
@@ -144,6 +150,8 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                 unsafe {
                     let heap_start = &HEAP_START as *const _ as usize;
                     if heap_start >= addr {
+                        hstart = heap_start;
+                        hsize = size;
                         ALLOCATOR.lock().init(heap_start, size);
                         break;
                     } else {
@@ -236,12 +244,20 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     #[cfg(test)]
     test_main();
 
+    let hend = hstart + hsize;
+    UART.map(|u| writeln!(u, "heap start: {hstart}, heap end: {hend}, heap size: {hsize}"));
+    let new_hstart = mm::align_up(hstart, mm::PAGE_SIZE);
+    let new_hend = mm::align_down(hend, mm::PAGE_SIZE);
+    let new_hsize = hend - hstart;
+    let num_pages = new_hsize / mm::PAGE_SIZE;
+    UART.map(|u| writeln!(u, "heap start: {new_hstart}, heap end: {new_hend}, heap size: {new_hsize}, num pages {num_pages}"));
+
     ALLOCATOR_LIST.lock().replace(Vec::new());
     ALLOCATOR_LIST.map(|alist| alist.push(arena::LabeledArena::empty(label::Label::High)));
 
     for i in 0..10 {
         use core::alloc::Layout;
-        use arena::PAGE_SIZE;
+        use mm::PAGE_SIZE;
 
         // Request parameters
         let memory   = PAGE_SIZE * 10;
@@ -255,7 +271,16 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         let arena = ALLOCATOR
             .lock()
             .split(layout)
-            .map(|a| arena::LabeledArena::from_arena(a, label));
+            .map(|a| arena::LabeledArena::new(a, label));
+
+        // TODO: evict if fail to create an arena object
+        // we either kill the evicted thread / requeue it.
+        // A problem of requeue is that we find somewhere to
+        // store the userdata for re-execute or the snapshot (harder)
+        // Secondly, we might want to implement a faceted allocator
+        // to automatically handle eviction and whatever. We need
+        // to build a communication mechanism for eviction, because
+        // powering off some cpu is asynchronous.
 
         thread::launch(arena, lifetime, move || {
             UART.map(|uart| {
@@ -339,10 +364,10 @@ trait Testable {
     fn run(&self, uart: &mut uart::UART);
 }
 
-impl<T: Fn(&mut uart::UART)> Testable for T {
+impl<T: Fn()> Testable for T {
     fn run(&self, uart: &mut uart::UART) {
         let _ = write!(uart, "{}...\t", core::any::type_name::<T>());
-        self(uart);
+        self();
         let _ = writeln!(uart, "[ok]");
     }
 }
