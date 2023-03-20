@@ -18,6 +18,8 @@ struct Thread<T: Sized> {
     stack: Box<[usize; 1024], RawLabeledArena>,
     userdata: T,
     arena: Option<LabeledArena>,
+    // arena: Option<Arena>,
+    // label: Label,
 }
 
 impl<'a, T: Sized> Drop for Thread<T> {

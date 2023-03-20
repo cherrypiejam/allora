@@ -21,7 +21,7 @@ pub mod utils;
 pub mod virtio;
 
 mod apps;
-mod mm;
+mod memory;
 mod exception;
 mod timer;
 mod label;
@@ -38,7 +38,7 @@ use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
 use core::time::Duration;
 
-use mm::arena;
+use memory::arena;
 
 extern "C" {
     static HEAP_START: usize;
@@ -102,14 +102,17 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 }
 
 #[global_allocator]
-static ALLOCATOR: mm::arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
+static ALLOCATOR: memory::arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
 // static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
 static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
 static ALLOCATOR_LIST: mutex::Mutex<Option<Vec<arena::LabeledArena>>> = mutex::Mutex::new(None);
+// Top-level memory allocator
+static MEM_POOL: mutex::Mutex<Option<memory::pool::PageMap>> = mutex::Mutex::new(None);
+// Label-specific memory allocator
+static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<memory::pool::LabeledPageSet>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
-
 const APP_ENABLE: bool = false;
 
 #[no_mangle]
@@ -143,6 +146,15 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
             })
             .unwrap_or(2);
 
+
+    let hend = hstart + hsize;
+    UART.map(|u| writeln!(u, "heap start: {hstart}, heap end: {hend}, heap size: {hsize}"));
+    let new_hstart = memory::align_up(hstart, memory::PAGE_SIZE);
+    let new_hend = memory::align_down(hend, memory::PAGE_SIZE);
+    let new_hsize = hend - hstart;
+    let num_pages = new_hsize / memory::PAGE_SIZE;
+    UART.map(|u| writeln!(u, "heap start: {new_hstart}, heap end: {new_hend}, heap size: {new_hsize}, num pages {num_pages}"));
+
         for memory in root.children_by_prop("device_type", |prop| prop.value == b"memory\0") {
             if let Some(reg) = memory.prop_by_name("reg") {
                 let (addr, rest) = regs_to_usize(reg.value, address_cell);
@@ -152,7 +164,14 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                     if heap_start >= addr {
                         hstart = heap_start;
                         hsize = size;
-                        ALLOCATOR.lock().init(heap_start, size);
+
+                        let pool_start = memory::align_up(heap_start + size / 2, memory::PAGE_SIZE);
+                        let pool_end = memory::align_down(heap_start + size, memory::PAGE_SIZE);
+                        let pool_size = pool_end - pool_start;
+                        let heap_size = pool_start - heap_start;
+
+                        ALLOCATOR.lock().init(heap_start, heap_size);
+                        MEM_POOL.lock().replace(memory::pool::PageMap::new(pool_start, pool_size));
                         break;
                     } else {
                         panic!("{:#x} {:#x}", addr, heap_start);
@@ -246,24 +265,42 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
 
     let hend = hstart + hsize;
     UART.map(|u| writeln!(u, "heap start: {hstart}, heap end: {hend}, heap size: {hsize}"));
-    let new_hstart = mm::align_up(hstart, mm::PAGE_SIZE);
-    let new_hend = mm::align_down(hend, mm::PAGE_SIZE);
+    let new_hstart = memory::align_up(hstart, memory::PAGE_SIZE);
+    let new_hend = memory::align_down(hend, memory::PAGE_SIZE);
     let new_hsize = hend - hstart;
-    let num_pages = new_hsize / mm::PAGE_SIZE;
+    let num_pages = new_hsize / memory::PAGE_SIZE;
     UART.map(|u| writeln!(u, "heap start: {new_hstart}, heap end: {new_hend}, heap size: {new_hsize}, num pages {num_pages}"));
 
     ALLOCATOR_LIST.lock().replace(Vec::new());
     ALLOCATOR_LIST.map(|alist| alist.push(arena::LabeledArena::empty(label::Label::High)));
 
+
+    LOCAL_MEM_POOL.lock().replace(Vec::new());
+    LOCAL_MEM_POOL.map(|plist| plist.push(memory::pool::LabeledPageSet::new(label::Label::High)));
+
     for i in 0..10 {
-        use core::alloc::Layout;
-        use mm::PAGE_SIZE;
+        // use core::alloc::Layout;
+        // use memory::PAGE_SIZE;
 
         // Request parameters
-        let memory   = PAGE_SIZE * 10;
-        let label    = label::Label::High;
+        // let memory   = PAGE_SIZE * 10;
+        // let label    = label::Label::High;
+        // let lifetime = Duration::from_millis(1);
+        // let layout   = Layout::from_size_align(memory, PAGE_SIZE).unwrap();
+
+        let page_count = 10; // # pages
+        let label  = label::Label::High;
         let lifetime = Duration::from_millis(1);
-        let layout   = Layout::from_size_align(memory, PAGE_SIZE).unwrap();
+
+        let page_start = MEM_POOL
+            .lock()
+            .and_then(|p| p.get_multiple(page_count).ok())
+            .unwrap(); // ignore evict
+
+        LOCAL_MEM_POOL.map(|plist| {
+            plist.iter().find(|p| p.label() == label).map(|p| p.borrow().put_mutiple(page_start, page_count))
+        });
+
 
         // Add requested memory to the label-specific bottom level allocator.
         // And get an allocator instance from bottom level allocator
