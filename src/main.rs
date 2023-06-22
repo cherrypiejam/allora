@@ -1,9 +1,16 @@
 #![no_main]
 #![no_std]
 #![feature(alloc_error_handler)]
+#![feature(allocator_api, nonnull_slice_from_raw_parts)]
+#![feature(new_uninit)]
+
+#![feature(custom_test_frameworks)]
+#![test_runner(test_runner)]
+#![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 
 pub mod device_tree;
 pub mod gic;
@@ -14,15 +21,25 @@ pub mod utils;
 pub mod virtio;
 
 mod apps;
+mod memory;
+mod exception;
+mod timer;
+mod label;
+mod bitmap;
+mod faceted_mutex;
 
 use virtio::VirtIORegs;
 
 #[cfg(target_arch = "aarch64")]
 global_asm!(include_str!("boot.S"));
+global_asm!(include_str!("exception.S"));
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
+use core::time::Duration;
+
+use memory::arena;
 
 extern "C" {
     static HEAP_START: usize;
@@ -66,18 +83,52 @@ fn interrupt_for_node(node: &device_tree::Node) -> Option<u32> {
     })
 }
 
+fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
+    node.prop_by_name("interrupts").map(|interrupt| {
+        let mut interrupts: Vec<u32> = Vec::new();
+        let (mut irq_type, rest) = regs_to_usize(interrupt.value, 1);
+        let (mut irq, mut rest) = regs_to_usize(rest, 1);
+        interrupts.push(get_interrupt(irq_type, irq));
+        loop {
+            if rest.len() > 4 { // Stop at 0, 0, 15, 4
+                (irq_type, rest) = regs_to_usize(&rest[4..], 1);
+                (irq, rest) = regs_to_usize(rest, 1);
+                interrupts.push(get_interrupt(irq_type, irq));
+            } else {
+                break
+            }
+        }
+        interrupts
+    })
+}
+
 #[global_allocator]
-static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
+static ALLOCATOR: memory::arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
+// static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
+
+static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
+
+// Top-level memory allocator
+static MEM_POOL: mutex::Mutex<Option<memory::pool::PageMap>> = mutex::Mutex::new(None);
+
+// Label-specific memory allocator
+static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<memory::pool::LabeledPageSet>>> = mutex::Mutex::new(None);
+
+static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
+const APP_ENABLE: bool = false;
 
 #[no_mangle]
 pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     gic::init();
 
-    static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
+    // static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 
     static BLK: mutex::Mutex<Option<virtio::VirtIOBlk>> = mutex::Mutex::new(None);
     static ENTROPY: mutex::Mutex<Option<virtio::VirtIOEntropy>> = mutex::Mutex::new(None);
     static NET: mutex::Mutex<Option<virtio::VirtIONet>> = mutex::Mutex::new(None);
+
+    let mut hstart = 0;
+    let mut hsize = 0;
 
     if let Some(root) = dtb.root() {
         let size_cell = root
@@ -97,6 +148,15 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
             })
             .unwrap_or(2);
 
+
+    let hend = hstart + hsize;
+    UART.map(|u| writeln!(u, "heap start: {hstart}, heap end: {hend}, heap size: {hsize}"));
+    let new_hstart = memory::align_up(hstart, memory::PAGE_SIZE);
+    let new_hend = memory::align_down(hend, memory::PAGE_SIZE);
+    let new_hsize = hend - hstart;
+    let num_pages = new_hsize / memory::PAGE_SIZE;
+    UART.map(|u| writeln!(u, "heap start: {new_hstart}, heap end: {new_hend}, heap size: {new_hsize}, num pages {num_pages}"));
+
         for memory in root.children_by_prop("device_type", |prop| prop.value == b"memory\0") {
             if let Some(reg) = memory.prop_by_name("reg") {
                 let (addr, rest) = regs_to_usize(reg.value, address_cell);
@@ -104,7 +164,16 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                 unsafe {
                     let heap_start = &HEAP_START as *const _ as usize;
                     if heap_start >= addr {
-                        ALLOCATOR.lock().init(heap_start, size);
+                        hstart = heap_start;
+                        hsize = size;
+
+                        let pool_start = memory::align_up(heap_start + size / 2, memory::PAGE_SIZE);
+                        let pool_end = memory::align_down(heap_start + size, memory::PAGE_SIZE);
+                        let pool_size = pool_end - pool_start;
+                        let heap_size = pool_start - heap_start;
+
+                        ALLOCATOR.lock().init(heap_start, heap_size);
+                        MEM_POOL.lock().replace(memory::pool::PageMap::new(pool_start, pool_size));
                         break;
                     } else {
                         panic!("{:#x} {:#x}", addr, heap_start);
@@ -132,6 +201,18 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                         }
                     });
                 });
+        }
+
+        exception::load_table();
+
+        if let Some(timer) = root.child_by_name("timer") {
+            if let Some(irq) = interrupts_for_node(&timer)
+                .map(|irqs| {
+                    irqs.into_iter().find(|&irq| irq == timer::EL1_PHYSICAL_TIMER)
+                })
+                .flatten() {
+                timer::init_timer(unsafe { gic::GIC::new(irq) });
+            }
         }
 
         for child in root.children_by_prop("compatible", |prop| prop.value == b"virtio,mmio\0") {
@@ -179,34 +260,126 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
         }
     }
 
-    thread::spawn(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}\n", utils::current_core());
+    WAIT_LIST.lock().replace(Vec::new());
+
+    #[cfg(test)]
+    test_main();
+
+    let hend = hstart + hsize;
+    UART.map(|u| writeln!(u, "heap start: {hstart}, heap end: {hend}, heap size: {hsize}"));
+    let new_hstart = memory::align_up(hstart, memory::PAGE_SIZE);
+    let new_hend = memory::align_down(hend, memory::PAGE_SIZE);
+    let new_hsize = hend - hstart;
+    let num_pages = new_hsize / memory::PAGE_SIZE;
+    UART.map(|u| writeln!(u, "heap start: {new_hstart}, heap end: {new_hend}, heap size: {new_hsize}, num pages {num_pages}"));
+
+    LOCAL_MEM_POOL.lock().replace(Vec::new());
+    LOCAL_MEM_POOL.map(|plist| plist.push(memory::pool::LabeledPageSet::new(label::Label::High)));
+
+    for i in 0..10 {
+        // use core::alloc::Layout;
+        // use memory::PAGE_SIZE;
+
+        // Request parameters
+        // let memory   = PAGE_SIZE * 10;
+        // let label    = label::Label::High;
+        // let lifetime = Duration::from_millis(1);
+        // let layout   = Layout::from_size_align(memory, PAGE_SIZE).unwrap();
+
+        let page_count = 10; // # pages
+        let label  = label::Label::High;
+        let lifetime = Duration::from_millis(1);
+
+        let page_start = MEM_POOL
+            .lock()
+            .as_mut()
+            .and_then(|p| p.get_multiple(page_count).ok())
+            .unwrap(); // ignore evict
+
+        // Push pages to label-specific allocator
+        LOCAL_MEM_POOL.map(|plist| {
+            plist.iter_mut().find(|p| p.label() == label).map(|p| p.borrow_mut().put_mutiple(page_start, page_count))
         });
 
-        let mut shell = apps::shell::Shell {
-            blk: &BLK,
-            entropy: &ENTROPY,
-        };
-        apps::shell::main(&UART, &mut shell);
-    });
-
-    UART.lock()
-        .as_mut()
-        .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
-
-    thread::spawn(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}\n", utils::current_core());
+        // Get pages from the label-specific allocator
+        let arena = LOCAL_MEM_POOL.lock().as_mut().and_then(|plist| {
+            plist
+                .iter_mut()
+                .find(|p| p.label() == label)
+                .map(|p| {
+                    let page_start = p.borrow_mut().get_multiple(page_count).unwrap();
+                    let arena = arena::LabeledArena::empty(label);
+                    unsafe {
+                        arena.lock().init(page_start, page_count * memory::PAGE_SIZE)
+                    }
+                    arena
+                })
         });
-        NET.map(|mut net| {
+
+
+
+        // Add requested memory to the label-specific bottom level allocator.
+        // And get an allocator instance from bottom level allocator
+        // Alternatively, we can use use this as an allocator instance.
+        // let arena = ALLOCATOR
+            // .lock()
+            // .split(layout)
+            // .map(|a| arena::LabeledArena::new(a, label));
+
+        // TODO: evict if fail to create an arena object
+        // we either kill the evicted thread / requeue it.
+        // A problem of requeue is that we find somewhere to
+        // store the userdata for re-execute or the snapshot (harder)
+        // Secondly, we might want to implement a faceted allocator
+        // to automatically handle eviction and whatever. We need
+        // to build a communication mechanism for eviction, because
+        // powering off some cpu is asynchronous.
+
+        thread::launch(arena, lifetime, move || {
+            UART.map(|uart| {
+                let arena = thread::local_arena().unwrap();
+                let leet = Box::new_in(i + 1337, arena);
+                let _ = write!(
+                    uart,
+                    "Thread {i}:\n--- Running from core {}, label {:?}, data {}\n",
+                    utils::current_core(),
+                    arena.label(),
+                    leet,
+                );
+            });
+        });
+    }
+
+    if APP_ENABLE {
+        thread::spawn(|| {
+            UART.map(|uart| {
+                let _ = write!(uart, "Running from core {}\n", utils::current_core());
+            });
             let mut shell = apps::shell::Shell {
                 blk: &BLK,
                 entropy: &ENTROPY,
             };
-            apps::net::Net { net: &mut net }.run(&mut shell)
+            apps::shell::main(&UART, &mut shell);
         });
-    });
+
+        UART.lock()
+            .as_mut()
+            .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
+
+        thread::spawn(|| {
+            UART.map(|uart| {
+                let _ = write!(uart, "Running from core {}\n", utils::current_core());
+            });
+            NET.map(|mut net| {
+                let mut shell = apps::shell::Shell {
+                    blk: &BLK,
+                    entropy: &ENTROPY,
+                };
+                apps::net::Net { net: &mut net }.run(&mut shell)
+            });
+        });
+
+    }
 
     loop {
         unsafe {
@@ -225,4 +398,29 @@ fn panic(panic_info: &PanicInfo<'_>) -> ! {
 #[alloc_error_handler]
 fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout)
+}
+
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Testable]) {
+    use exception::InterruptDisabled;
+    InterruptDisabled::with(|| {
+        // It is single threaded anyway, let's disable interrupts.
+        let mut uart = unsafe { uart::UART::new(0x0900_0000 as _, gic::GIC::new(uart::IRQ)) };
+        for test in tests {
+            test.run(&mut uart);
+        }
+        unsafe { system_off() }
+    });
+}
+
+trait Testable {
+    fn run(&self, uart: &mut uart::UART);
+}
+
+impl<T: Fn()> Testable for T {
+    fn run(&self, uart: &mut uart::UART) {
+        let _ = write!(uart, "{}...\t", core::any::type_name::<T>());
+        self();
+        let _ = writeln!(uart, "[ok]");
+    }
 }
