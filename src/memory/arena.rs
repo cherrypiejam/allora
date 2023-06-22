@@ -207,6 +207,7 @@ impl Arena {
     }
 }
 
+#[derive(Debug)]
 pub struct LabeledArena {
     inner: Mutex<Arena>,
     label: Label,
@@ -246,9 +247,22 @@ impl LabeledArena {
             })
     }
 
-    pub fn join(&self, arena: LabeledArena) {
-        self.lock()
-            .join(arena.inner.into_inner())
+    // pub fn join(&self, arena: LabeledArena) {
+        // self.lock()
+            // .join(arena.inner.into_inner())
+    // }
+}
+
+impl Drop for LabeledArena {
+    fn drop(&mut self) {
+        crate::LOCAL_MEM_POOL.map(|plist| {
+            plist.iter_mut()
+                .find(|p| p.label() == self.label())
+                .map(|p| {
+                    // p.put_mutiple(self.lock().heap_start, self.lock().heap_size / crate::memory::PAGE_SIZE)
+                    // a.join(arena);
+                });
+        });
     }
 }
 

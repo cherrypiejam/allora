@@ -2,6 +2,7 @@ use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 
+#[derive(Debug)]
 pub struct Mutex<T: ?Sized> {
     locked: AtomicBool,
     data: UnsafeCell<T>,

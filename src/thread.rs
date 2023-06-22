@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use core::fmt::Write;
 use core::sync::atomic::{AtomicU16, Ordering};
 use core::time::Duration;
 use core::arch::asm;
@@ -7,7 +8,7 @@ use core::ptr;
 
 // use core::marker::PhantomPinned;
 
-use crate::{gic, timer, WAIT_LIST, ALLOCATOR, ALLOCATOR_LIST};
+use crate::{gic, timer, WAIT_LIST, ALLOCATOR};
 use crate::utils::current_core;
 use crate::arena::{LabeledArena, RawLabeledArena};
 use crate::exception::{self, InterruptDisabled};
@@ -22,21 +23,24 @@ struct Thread<T: Sized> {
     // label: Label,
 }
 
-impl<'a, T: Sized> Drop for Thread<T> {
-    fn drop(&mut self) {
-        self.arena
-            .take()
-            .map(|arena| {
-                ALLOCATOR_LIST.map(|alist| {
-                    alist.iter()
-                        .find(|a| a.label() == arena.label())
-                        .map(|a| {
-                            a.join(arena);
-                        });
-                });
-            });
-    }
-}
+// impl<'a, T: Sized> Drop for Thread<T> {
+    // fn drop(&mut self) {
+        // // TODO add arena back to the label-specific allocator
+        // crate::UART.map(|u| u.write_fmt(format_args!("{:?}\n", self.arena.take().unwrap())));
+        // // self.arena
+            // // .take()
+            // // .map(|arena| {
+                // // ALLOCATOR_LIST.map(|alist| {
+                    // // alist.iter()
+                        // // .find(|a| a.label() == arena.label())
+                        // // .map(|a| {
+                            // // a.join(arena);
+                        // // });
+                // // });
+            // // });
+        // crate::UART.map(|u| u.write_fmt(format_args!("in drop end\n")));
+    // }
+// }
 
 extern "C" {
     fn cpu_on(core: usize, main: *mut core::ffi::c_void) -> isize;
@@ -128,11 +132,18 @@ pub fn cpu_off_graceful() {
     }
 
     unsafe {
+
+        crate::UART.map(|u| u.write_fmt(format_args!("before drop\n")));
         current_thread()
             .map(|curr| {
-                drop(Box::from_raw(curr as *mut _)) // drop explicitly
+                crate::UART.map(|u| u.write_fmt(format_args!("before drop 2\n")));
+                drop(Box::from_raw(curr as *mut _)); // drop explicitly
+                crate::UART.map(|u| u.write_fmt(format_args!("after drop 0\n")));
             });
+
+        crate::UART.map(|u| u.write_fmt(format_args!("after drop\n")));
         init_thread(0 as *const _);
+        crate::UART.map(|u| u.write_fmt(format_args!("after drop 2\n")));
         cpu_off();
     }
 }

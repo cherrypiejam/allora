@@ -17,7 +17,7 @@ const PAGE_START:   usize = 0;
 
 
 fn is_aligned_to_page(addr: usize) -> bool {
-    (addr & PAGE_MASK) != 0
+    (addr & PAGE_MASK) == 0
 }
 
 fn convert_page_index_to_addr(start: usize, index: usize) -> usize {
@@ -31,8 +31,6 @@ fn convert_page_addr_to_index(start: usize, addr: usize) -> usize {
     assert!(is_aligned_to_page(addr));
     (addr - start) >> PAGE_BITS
 }
-
-
 
 pub struct PageMap {
     pool: Bitmap,
@@ -155,7 +153,6 @@ impl LabeledPageSet {
 
 impl Deref for LabeledPageSet {
     type Target = PageSet;
-
     fn deref(&self) -> &Self::Target {
         &self.inner
     }

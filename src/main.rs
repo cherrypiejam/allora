@@ -26,6 +26,7 @@ mod exception;
 mod timer;
 mod label;
 mod bitmap;
+mod faceted_mutex;
 
 use virtio::VirtIORegs;
 
@@ -106,9 +107,10 @@ static ALLOCATOR: memory::arena::LabeledArena = arena::LabeledArena::empty(label
 // static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
 static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
-static ALLOCATOR_LIST: mutex::Mutex<Option<Vec<arena::LabeledArena>>> = mutex::Mutex::new(None);
+
 // Top-level memory allocator
 static MEM_POOL: mutex::Mutex<Option<memory::pool::PageMap>> = mutex::Mutex::new(None);
+
 // Label-specific memory allocator
 static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<memory::pool::LabeledPageSet>>> = mutex::Mutex::new(None);
 
@@ -271,10 +273,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     let num_pages = new_hsize / memory::PAGE_SIZE;
     UART.map(|u| writeln!(u, "heap start: {new_hstart}, heap end: {new_hend}, heap size: {new_hsize}, num pages {num_pages}"));
 
-    ALLOCATOR_LIST.lock().replace(Vec::new());
-    ALLOCATOR_LIST.map(|alist| alist.push(arena::LabeledArena::empty(label::Label::High)));
-
-
     LOCAL_MEM_POOL.lock().replace(Vec::new());
     LOCAL_MEM_POOL.map(|plist| plist.push(memory::pool::LabeledPageSet::new(label::Label::High)));
 
@@ -294,21 +292,39 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
 
         let page_start = MEM_POOL
             .lock()
+            .as_mut()
             .and_then(|p| p.get_multiple(page_count).ok())
             .unwrap(); // ignore evict
 
+        // Push pages to label-specific allocator
         LOCAL_MEM_POOL.map(|plist| {
-            plist.iter().find(|p| p.label() == label).map(|p| p.borrow().put_mutiple(page_start, page_count))
+            plist.iter_mut().find(|p| p.label() == label).map(|p| p.borrow_mut().put_mutiple(page_start, page_count))
         });
+
+        // Get pages from the label-specific allocator
+        let arena = LOCAL_MEM_POOL.lock().as_mut().and_then(|plist| {
+            plist
+                .iter_mut()
+                .find(|p| p.label() == label)
+                .map(|p| {
+                    let page_start = p.borrow_mut().get_multiple(page_count).unwrap();
+                    let arena = arena::LabeledArena::empty(label);
+                    unsafe {
+                        arena.lock().init(page_start, page_count * memory::PAGE_SIZE)
+                    }
+                    arena
+                })
+        });
+
 
 
         // Add requested memory to the label-specific bottom level allocator.
         // And get an allocator instance from bottom level allocator
         // Alternatively, we can use use this as an allocator instance.
-        let arena = ALLOCATOR
-            .lock()
-            .split(layout)
-            .map(|a| arena::LabeledArena::new(a, label));
+        // let arena = ALLOCATOR
+            // .lock()
+            // .split(layout)
+            // .map(|a| arena::LabeledArena::new(a, label));
 
         // TODO: evict if fail to create an arena object
         // we either kill the evicted thread / requeue it.
