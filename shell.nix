@@ -17,7 +17,7 @@ let
   inherit (pkgs) stdenv lib;
   moz_overlay = import (builtins.fetchTarball https://github.com/mozilla/nixpkgs-mozilla/archive/master.tar.gz);
   nixpkgs = import <nixpkgs> { overlays = [ moz_overlay ]; };
-  rust_date = "2021-03-19";
+  rust_date = "2023-03-10";
   rust_channel = "nightly";
   rust_targets = [
     "aarch64-unknown-none"
