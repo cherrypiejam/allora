@@ -26,7 +26,6 @@ mod exception;
 mod timer;
 mod label;
 mod bitmap;
-mod faceted_mutex;
 
 use virtio::VirtIORegs;
 
@@ -109,16 +108,16 @@ static ALLOCATOR: memory::arena::LabeledArena = arena::LabeledArena::empty(label
 static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
 
 // Top-level memory allocator
-static MEM_POOL: mutex::Mutex<Option<memory::pool::PageMap>> = mutex::Mutex::new(None);
+static MEM_POOL: mutex::Mutex<Option<memory::page::PageMap>> = mutex::Mutex::new(None);
 
 // Label-specific memory allocator
-static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<memory::pool::LabeledPageSet>>> = mutex::Mutex::new(None);
+static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<memory::page::LabeledPageSet>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 const APP_ENABLE: bool = false;
 
 #[no_mangle]
-pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
+pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _ttbr0_el1: u64, _x3: u64) {
     gic::init();
 
     // static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
@@ -148,15 +147,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
             })
             .unwrap_or(2);
 
-
-    let hend = hstart + hsize;
-    UART.map(|u| writeln!(u, "heap start: {hstart}, heap end: {hend}, heap size: {hsize}"));
-    let new_hstart = memory::align_up(hstart, memory::PAGE_SIZE);
-    let new_hend = memory::align_down(hend, memory::PAGE_SIZE);
-    let new_hsize = hend - hstart;
-    let num_pages = new_hsize / memory::PAGE_SIZE;
-    UART.map(|u| writeln!(u, "heap start: {new_hstart}, heap end: {new_hend}, heap size: {new_hsize}, num pages {num_pages}"));
-
         for memory in root.children_by_prop("device_type", |prop| prop.value == b"memory\0") {
             if let Some(reg) = memory.prop_by_name("reg") {
                 let (addr, rest) = regs_to_usize(reg.value, address_cell);
@@ -167,13 +157,13 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
                         hstart = heap_start;
                         hsize = size;
 
-                        let pool_start = memory::align_up(heap_start + size / 2, memory::PAGE_SIZE);
-                        let pool_end = memory::align_down(heap_start + size, memory::PAGE_SIZE);
+                        let pool_start = memory::page_align_up(heap_start + size / 2);
+                        let pool_end = memory::page_align_down(heap_start + size);
                         let pool_size = pool_end - pool_start;
                         let heap_size = pool_start - heap_start;
 
                         ALLOCATOR.lock().init(heap_start, heap_size);
-                        MEM_POOL.lock().replace(memory::pool::PageMap::new(pool_start, pool_size));
+                        MEM_POOL.lock().replace(memory::page::PageMap::new(pool_start, pool_size));
                         break;
                     } else {
                         panic!("{:#x} {:#x}", addr, heap_start);
@@ -265,18 +255,29 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree) {
     #[cfg(test)]
     test_main();
 
-    let hend = hstart + hsize;
-    UART.map(|u| writeln!(u, "heap start: {hstart}, heap end: {hend}, heap size: {hsize}"));
-    let new_hstart = memory::align_up(hstart, memory::PAGE_SIZE);
-    let new_hend = memory::align_down(hend, memory::PAGE_SIZE);
-    let new_hsize = hend - hstart;
-    let num_pages = new_hsize / memory::PAGE_SIZE;
-    UART.map(|u| writeln!(u, "heap start: {new_hstart}, heap end: {new_hend}, heap size: {new_hsize}, num pages {num_pages}"));
+    // let hend = hstart + hsize;
+    // UART.map(|u| writeln!(u, "heap start: {:#x}, heap end: {:#x}, heap size: {:#x}", hstart, hend, hsize));
+    // let new_hstart = memory::align_up(hstart, memory::PAGE_SIZE);
+    // let new_hend = memory::align_down(hend, memory::PAGE_SIZE);
+    // let new_hsize = hend - hstart;
+    // let num_pages = new_hsize / memory::PAGE_SIZE;
+    // UART.map(|u| writeln!(u, "heap start: {:#x}, heap end: {:#x}, heap size: {:#x}, num pages {num_pages}", new_hstart, new_hend, new_hsize));
+
+    // UART.map(|u| writeln!(u, "x0: {:#x}, p2 {:#x}, p3: {:#x}", dtb as *const _ as u64, p2, p3));
+    // unsafe {
+        // let cur: u64;
+        // asm!("mrs {}, CurrentEL",
+             // out(reg) cur);
+        UART.map(|u| writeln!(u, "current el: {}, _start_addr: {:#x}", utils::current_el(), _start_addr));
+    // }
+
+    // let heap_start = unsafe {&HEAP_START as *const _ as usize};
+    // UART.map(|u| writeln!(u, "heap start: {:#x}, x3 {:#x}", heap_start, _x3));
 
     LOCAL_MEM_POOL.lock().replace(Vec::new());
-    LOCAL_MEM_POOL.map(|plist| plist.push(memory::pool::LabeledPageSet::new(label::Label::High)));
+    LOCAL_MEM_POOL.map(|plist| plist.push(memory::page::LabeledPageSet::new(label::Label::High)));
 
-    for i in 0..10 {
+    for i in 0..0 {
         // use core::alloc::Layout;
         // use memory::PAGE_SIZE;
 

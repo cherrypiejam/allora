@@ -9,7 +9,7 @@ use crate::label::Label;
 use crate::bitmap::Bitmap;
 
 use super::PAGE_SIZE;
-use super::utils::{align_up, align_down};
+use super::{align_up, align_down};
 
 type ChunkLink = Option<NonNull<Chunk>>;
 

@@ -1,23 +1,22 @@
 pub mod arena;
-pub mod pool;
+pub mod page;
 
-pub use pool::PAGE_SIZE;
-pub use utils::{align_up, align_down};
+pub use page::{PAGE_SIZE, Error};
 
-#[derive(Debug)]
-pub enum Error {
-    PageNotFound,
-    PageExists,
+pub fn page_align_down(addr: usize) -> usize {
+    align_down(addr, PAGE_SIZE)
 }
 
-mod utils {
-    // Must be a power of 2 align
-    pub fn align_down(addr: usize, align: usize) -> usize {
-        assert_eq!(align & (align - 1), 0);
-        addr & !(align - 1)
-    }
+pub fn page_align_up(addr: usize) -> usize {
+    align_up(addr, PAGE_SIZE)
+}
 
-    pub fn align_up(addr: usize, align: usize) -> usize {
-        align_down(addr + (align - 1), align)
-    }
+// Must be a power of 2 align
+fn align_down(addr: usize, align: usize) -> usize {
+    assert_eq!(align & (align - 1), 0);
+    addr & !(align - 1)
+}
+
+fn align_up(addr: usize, align: usize) -> usize {
+    align_down(addr + (align - 1), align)
 }

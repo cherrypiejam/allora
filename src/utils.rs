@@ -131,3 +131,12 @@ pub fn current_core() -> usize {
     }
     core
 }
+
+pub fn current_el() -> usize {
+    let current_el: usize;
+    unsafe {
+        asm!("mrs {}, CurrentEL",
+             out(reg) current_el);
+    }
+    current_el >> 2 & 0b11
+}

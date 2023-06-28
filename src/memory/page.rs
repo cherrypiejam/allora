@@ -6,8 +6,6 @@ use alloc::collections::BTreeMap;
 use crate::bitmap::Bitmap;
 use crate::label::Label;
 
-use super::Error;
-
 const PAGE_BITS: usize = 12;
 pub const PAGE_SIZE: usize = 1 << PAGE_BITS;
 const PAGE_MASK: usize = (1 << PAGE_BITS) - 1;
@@ -15,6 +13,11 @@ const PAGE_MASK: usize = (1 << PAGE_BITS) - 1;
 const PAGE_IS_FREE: bool  = false;
 const PAGE_START:   usize = 0;
 
+#[derive(Debug)]
+pub enum Error {
+    PageNotFound,
+    PageExists,
+}
 
 fn is_aligned_to_page(addr: usize) -> bool {
     (addr & PAGE_MASK) == 0
