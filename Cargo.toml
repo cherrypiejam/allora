@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 linked_list_allocator = "0.8.11"
-# labeled = { git = "https://github.com/cherrypiejam/labeled", features = ["buckle" "allocator_api"] }
+labeled = { git = "https://github.com/cherrypiejam/labeled", features = ["buckle2"] }
 
 [profile.release]
 debug = true

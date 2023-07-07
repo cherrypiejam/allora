@@ -7,6 +7,7 @@ name = "aarch64os"
 version = "0.1.0"
 dependencies = [
  "cc",
+ "labeled",
  "linked_list_allocator",
 ]
 
@@ -15,6 +16,11 @@ name = "cc"
 version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50d30906286121d95be3d479533b458f87493b30a4b5f79a607db8f5d11aa91f"
+
+[[package]]
+name = "labeled"
+version = "0.1.0"
+source = "git+https://github.com/cherrypiejam/labeled#330caf2f9bf89d89121a9b8e31e59c34ad53979d"
 
 [[package]]
 name = "linked_list_allocator"
