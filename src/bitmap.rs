@@ -1,6 +1,6 @@
 //! Heap alloc bitmap
 
-#![allow(dead_code)]
+// #![allow(dead_code)]
 
 use core::alloc::Allocator;
 use alloc::{vec::Vec, vec};
@@ -27,8 +27,10 @@ impl Bitmap {
             bits: vec![0; Self::item_count(bit_count)]
         }
     }
+}
 
-    pub fn new_in<A: Allocator>(bit_count: usize, alloc: A) -> Bitmap<A> {
+impl<A: Allocator> Bitmap<A> {
+    pub fn new_in(bit_count: usize, alloc: A) -> Bitmap<A> {
         let item_count = Self::item_count(bit_count);
         let mut bits = Vec::with_capacity_in(item_count, alloc);
         bits.resize(item_count, 0);
