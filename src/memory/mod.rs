@@ -1,6 +1,7 @@
 pub mod arena;
 pub mod page;
 mod yaarena;
+mod page_tree;
 
 pub use page::{PAGE_SIZE, Error};
 
