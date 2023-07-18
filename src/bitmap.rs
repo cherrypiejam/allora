@@ -1,7 +1,5 @@
 //! Heap alloc bitmap
 
-// #![allow(dead_code)]
-
 use core::alloc::Allocator;
 use alloc::{vec::Vec, vec};
 use alloc::alloc::Global;

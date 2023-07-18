@@ -9,3 +9,6 @@ impl Label {
         self <= rhs
     }
 }
+
+pub use labeled::buckle2::Buckle2 as Buckle;
+
