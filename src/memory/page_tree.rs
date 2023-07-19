@@ -152,46 +152,13 @@ impl PageTree {
 
     fn delete(&mut self, n: usize) {
         use core::fmt::Write;
-        crate::UART.map(|u| writeln!(u, "------start deletion {:?}", n));
-        let mut clink = NonNull::new((PAGE_SIZE * n) as *mut PageNode);
+        let clink = NonNull::new((PAGE_SIZE * n) as *mut PageNode);
         let mut blink = clink;
         let mut alink: PageLink;
         let mut bcolor = blink.node().unwrap().color;
         if clink.left().is_none() {
-            let target = NonNull::new((388469 * PAGE_SIZE) as *mut PageNode);
-            crate::UART.map(|u| writeln!(u, "root: {:?}", self.root.node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.left: {:?}", self.root.left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.left.left: {:?}", self.root.left().left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.left.right: {:?}", self.root.left().right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right: {:?}", self.root.right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right.left: {:?}", self.root.right().left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right.right: {:?}", self.root.right().right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right.left.left: {:?}", self.root.right().left().left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right.left.right: {:?}", self.root.right().left().right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "c: {:?}", clink.node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "c.left: {:?}", clink.left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "c.right: {:?}", clink.right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "c.parent: {:?}", clink.parent().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "target: {:?}", target.node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "target.left: {:?}", target.left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "target.right: {:?}", target.right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "target.parent: {:?}", target.parent().node().map(|n| n.n)));
             alink = clink.right();
             self.transplant(clink, clink.right());
-            crate::UART.map(|u| writeln!(u, ">> after transplant"));
-            crate::UART.map(|u| writeln!(u, "root: {:?}", self.root.node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.left: {:?}", self.root.left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.left.left: {:?}", self.root.left().left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.left.right: {:?}", self.root.left().right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right: {:?}", self.root.right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right.left: {:?}", self.root.right().left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right.right: {:?}", self.root.right().right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right.left.left: {:?}", self.root.right().left().left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "root.right.left.right: {:?}", self.root.right().left().right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "target: {:?}", target.node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "target.left: {:?}", target.left().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "target.right: {:?}", target.right().node().map(|n| n.n)));
-            crate::UART.map(|u| writeln!(u, "target.parent: {:?}", target.parent().node().map(|n| n.n)));
         } else if clink.right().is_none() {
             alink = clink.left();
             self.transplant(clink, clink.left());
@@ -461,20 +428,4 @@ mod test {
         pt.delete(base+8);
         assert_eq!(&*pt.traverse(), []);
     }
-
-    // #[test_case]
-    fn test_page_tree_del() {
-        let mut pt = PageTree::new();
-
-        let base = unsafe { &HEAP_START as *const _ as usize + SIZE };
-        let base = page_align_up(base) / PAGE_SIZE;
-
-        pt.insert(base + 1);
-        pt.insert(base + 3);
-        pt.insert(base + 2);
-        pt.delete(base + 2);
-        assert_eq!(&*pt.traverse(), [base + 1, base + 3]);
-    }
-
-
 }
