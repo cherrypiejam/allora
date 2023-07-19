@@ -156,6 +156,21 @@ impl PageTree {
         self.root.node_mut().unwrap().color = Color::Black;
     }
 
+    pub fn get(&mut self) -> Option<usize> {
+        self.get_multiple(1)
+    }
+
+    pub fn get_multiple(&mut self, npages: usize) -> Option<usize> {
+        let pages = unsafe { self.traverse() };
+        (0..(pages.len()-(npages-1)))
+            .find(|&i| ((i+1)..(i+npages)).all(|j| pages[j - 1] + 1 == pages[j]))
+            .map(|i| {
+                (i..(i+npages))
+                    .for_each(|j| unsafe { self.delete(pages[j]) });
+                pages[i]
+            })
+    }
+
     // Safety: depends on the given page number
     unsafe fn delete(&mut self, n: usize) {
         let clink = NonNull::new((PAGE_SIZE * n) as *mut PageNode);
@@ -294,22 +309,24 @@ impl PageTree {
         }
     }
 
-    pub unsafe fn traverse(&mut self) -> heapless::Vec<usize, 128> {
+    pub fn traverse(&mut self) -> heapless::Vec<usize, 128> {
         let mut stack = heapless::Vec::<PageLink, 128>::new();
         let mut items = heapless::Vec::<usize, 128>::new();
         let mut visited = heapless::LinearMap::<PageLink, (), 128>::new();
         if self.root.is_some() {
             stack.push(self.root).unwrap();
         }
-        while let Some(link) = stack.pop() {
-            if link.left().is_some() && !visited.contains_key(&link.left()) {
-                stack.push(link).unwrap();
-                stack.push(link.left()).unwrap();
-            } else if link.left().is_none() || visited.contains_key(&link.left()) {
-                items.push(link.node().unwrap().n).unwrap();
-                visited.insert(link, ()).unwrap();
-                if link.right().is_some() {
-                    stack.push(link.right()).unwrap();
+        unsafe {
+            while let Some(link) = stack.pop() {
+                if link.left().is_some() && !visited.contains_key(&link.left()) {
+                    stack.push(link).unwrap();
+                    stack.push(link.left()).unwrap();
+                } else if link.left().is_none() || visited.contains_key(&link.left()) {
+                    items.push(link.node().unwrap().n).unwrap();
+                    visited.insert(link, ()).unwrap();
+                    if link.right().is_some() {
+                        stack.push(link.right()).unwrap();
+                    }
                 }
             }
         }
@@ -406,11 +423,11 @@ mod test {
 
     #[test_case]
     fn test_page_tree() {
-        unsafe {
-            let mut pt = PageTree::new();
-            let base = &HEAP_START as *const _ as usize + SIZE;
-            let base = page_align_up(base) / PAGE_SIZE;
+        let mut pt = PageTree::new();
+        let base = unsafe { &HEAP_START } as *const _ as usize + SIZE;
+        let base = page_align_up(base) / PAGE_SIZE;
 
+        unsafe {
             pt.insert(base+2);
             pt.insert(base+1);
             pt.insert(base);
@@ -434,5 +451,32 @@ mod test {
             pt.delete(base+8);
             assert_eq!(&*pt.traverse(), []);
         }
+    }
+
+    #[test_case]
+    fn test_page_tree() {
+        let mut pt = PageTree::new();
+        let base = unsafe { &HEAP_START } as *const _ as usize + SIZE;
+        let base = page_align_up(base) / PAGE_SIZE;
+
+        unsafe {
+            pt.insert(base);
+            pt.insert(base+5);
+            pt.insert(base+6);
+            pt.insert(base+9);
+            assert_eq!(&*pt.traverse(), [base, base+5, base+6, base+9]);
+        }
+
+        assert_eq!(pt.get_multiple(2), Some(base+5));
+        assert_eq!(&*pt.traverse(), [base, base+9]);
+
+        assert_eq!(pt.get(), Some(base));
+        assert_eq!(&*pt.traverse(), [base+9]);
+
+        assert_eq!(pt.get(), Some(base+9));
+        assert_eq!(&*pt.traverse(), []);
+
+        assert_eq!(pt.get(), None);
+        assert_eq!(&*pt.traverse(), []);
     }
 }
