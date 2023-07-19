@@ -19,31 +19,31 @@ struct PageNode {
 }
 
 trait IsPageLink {
-    fn node(&self) -> Option<&PageNode>;
-    fn node_mut(&mut self) -> Option<&mut PageNode>;
-    fn parent(&self) -> Option<NonNull<PageNode>>;
-    fn left(&self) -> Option<NonNull<PageNode>>;
-    fn right(&self) -> Option<NonNull<PageNode>>;
+    unsafe fn node(&self) -> Option<&PageNode>;
+    unsafe fn node_mut(&mut self) -> Option<&mut PageNode>;
+    unsafe fn parent(&self) -> Option<NonNull<PageNode>>;
+    unsafe fn left(&self) -> Option<NonNull<PageNode>>;
+    unsafe fn right(&self) -> Option<NonNull<PageNode>>;
 }
 
 impl IsPageLink for PageLink {
-    fn node(&self) -> Option<&PageNode> {
-        self.map(|n| unsafe { n.as_ref() })
+    unsafe fn node(&self) -> Option<&PageNode> {
+        self.map(|n| n.as_ref())
     }
 
-    fn node_mut(&mut self) -> Option<&mut PageNode> {
-        self.map(|mut n| unsafe { n.as_mut() })
+    unsafe fn node_mut(&mut self) -> Option<&mut PageNode> {
+        self.map(|mut n| n.as_mut())
     }
 
-    fn parent(&self) -> Option<NonNull<PageNode>> {
+    unsafe fn parent(&self) -> Option<NonNull<PageNode>> {
         self.node().and_then(|n| n.parent)
     }
 
-    fn left(&self) -> Option<NonNull<PageNode>> {
+    unsafe fn left(&self) -> Option<NonNull<PageNode>> {
         self.node().and_then(|n| n.left)
     }
 
-    fn right(&self) -> Option<NonNull<PageNode>> {
+    unsafe fn right(&self) -> Option<NonNull<PageNode>> {
         self.node().and_then(|n| n.right)
     }
 }
@@ -57,10 +57,17 @@ impl PageTree {
         PageTree { root: None }
     }
 
-    // Safety: depends on N, unsafe?
-    pub fn insert(&mut self, n: usize) {
+    pub unsafe fn init(&mut self, start: usize, size: usize) {
+        let base = page_align_up(start);
+        let npages = page_align_down(size) / PAGE_SIZE;
+        (base..base+npages)
+            .for_each(|n| self.insert(n))
+    }
+
+    // Safety: depends on the given page number
+    pub unsafe fn insert(&mut self, n: usize) {
         let mut cur = (self.root, None); // (curr, prev)
-        while let Some(current) = cur.0.map(|n| unsafe { n.as_ref() }) {
+        while let Some(current) = cur.0.map(|n| n.as_ref()) {
             cur.1 = cur.0;
             if n < current.n {
                 cur.0 = current.left;
@@ -117,7 +124,6 @@ impl PageTree {
                     if let Some(n) = clink.parent().parent().node_mut() {
                         self.right_rotate(n);
                     }
-                    // self.right_rotate(clink.parent().parent().node_mut().unwrap())
                 }
             } else {
                 let mut blink = clink.parent().parent().left();
@@ -150,8 +156,8 @@ impl PageTree {
         self.root.node_mut().unwrap().color = Color::Black;
     }
 
-    fn delete(&mut self, n: usize) {
-        use core::fmt::Write;
+    // Safety: depends on the given page number
+    unsafe fn delete(&mut self, n: usize) {
         let clink = NonNull::new((PAGE_SIZE * n) as *mut PageNode);
         let mut blink = clink;
         let mut alink: PageLink;
@@ -288,7 +294,7 @@ impl PageTree {
         }
     }
 
-    pub fn traverse(&mut self) -> heapless::Vec<usize, 128> {
+    pub unsafe fn traverse(&mut self) -> heapless::Vec<usize, 128> {
         let mut stack = heapless::Vec::<PageLink, 128>::new();
         let mut items = heapless::Vec::<usize, 128>::new();
         let mut visited = heapless::LinearMap::<PageLink, (), 128>::new();
@@ -354,7 +360,7 @@ impl PageTree {
         b.parent = a_ptr;
     }
 
-    fn transplant(&mut self, alink: PageLink, mut blink: PageLink) {
+    unsafe fn transplant(&mut self, alink: PageLink, mut blink: PageLink) {
         if let Some(_) = alink.parent() {
             if alink == alink.parent().left() {
                 if let Some(n) = alink.parent().node_mut() {
@@ -373,7 +379,7 @@ impl PageTree {
         }
     }
 
-    fn min_link(start: PageLink) -> PageLink {
+    unsafe fn min_link(start: PageLink) -> PageLink {
         let mut cur = start;
         while cur.left().is_some() {
             cur = cur.left()
@@ -381,7 +387,7 @@ impl PageTree {
         cur
     }
 
-    fn max_link(start: PageLink) -> PageLink {
+    unsafe fn max_link(start: PageLink) -> PageLink {
         let mut cur = start;
         while cur.right().is_some() {
             cur = cur.right()
@@ -400,32 +406,33 @@ mod test {
 
     #[test_case]
     fn test_page_tree() {
-        let mut pt = PageTree::new();
+        unsafe {
+            let mut pt = PageTree::new();
+            let base = &HEAP_START as *const _ as usize + SIZE;
+            let base = page_align_up(base) / PAGE_SIZE;
 
-        let base = unsafe { &HEAP_START as *const _ as usize + SIZE };
-        let base = page_align_up(base) / PAGE_SIZE;
+            pt.insert(base+2);
+            pt.insert(base+1);
+            pt.insert(base);
+            pt.insert(base+9);
+            pt.insert(base+8);
+            assert_eq!(&*pt.traverse(), [base, base+1, base+2, base+8, base+9]);
 
-        pt.insert(base+2);
-        pt.insert(base+1);
-        pt.insert(base);
-        pt.insert(base+9);
-        pt.insert(base+8);
-        assert_eq!(&*pt.traverse(), [base, base+1, base+2, base+8, base+9]);
+            pt.insert(base+5);
+            assert_eq!(&*pt.traverse(), [base, base+1, base+2, base+5, base+8, base+9]);
 
-        pt.insert(base+5);
-        assert_eq!(&*pt.traverse(), [base, base+1, base+2, base+5, base+8, base+9]);
-
-        pt.delete(base+2);
-        assert_eq!(&*pt.traverse(), [base, base+1, base+5, base+8, base+9]);
-        pt.delete(base);
-        assert_eq!(&*pt.traverse(), [base+1, base+5, base+8, base+9]);
-        pt.delete(base+9);
-        assert_eq!(&*pt.traverse(), [base+1, base+5, base+8]);
-        pt.delete(base+5);
-        assert_eq!(&*pt.traverse(), [base+1, base+8]);
-        pt.delete(base+1);
-        assert_eq!(&*pt.traverse(), [base+8]);
-        pt.delete(base+8);
-        assert_eq!(&*pt.traverse(), []);
+            pt.delete(base+2);
+            assert_eq!(&*pt.traverse(), [base, base+1, base+5, base+8, base+9]);
+            pt.delete(base);
+            assert_eq!(&*pt.traverse(), [base+1, base+5, base+8, base+9]);
+            pt.delete(base+9);
+            assert_eq!(&*pt.traverse(), [base+1, base+5, base+8]);
+            pt.delete(base+5);
+            assert_eq!(&*pt.traverse(), [base+1, base+8]);
+            pt.delete(base+1);
+            assert_eq!(&*pt.traverse(), [base+8]);
+            pt.delete(base+8);
+            assert_eq!(&*pt.traverse(), []);
+        }
     }
 }
