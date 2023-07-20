@@ -48,7 +48,7 @@ impl IsPageLink for PageLink {
     }
 }
 
-struct PageTree {
+pub struct PageTree {
     root: PageLink,
 }
 
@@ -58,7 +58,7 @@ impl PageTree {
     }
 
     pub unsafe fn init(&mut self, start: usize, size: usize) {
-        let base = page_align_up(start);
+        let base = page_align_up(start) / PAGE_SIZE;
         let npages = page_align_down(size) / PAGE_SIZE;
         (base..base+npages)
             .for_each(|n| self.insert(n))
@@ -456,24 +456,17 @@ mod test {
     #[test_case]
     fn test_page_tree() {
         let mut pt = PageTree::new();
-        let base = unsafe { &HEAP_START } as *const _ as usize + SIZE;
-        let base = page_align_up(base) / PAGE_SIZE;
+        let start = unsafe { &HEAP_START } as *const _ as usize + SIZE;
+        let base = page_align_up(start) / PAGE_SIZE;
 
         unsafe {
-            pt.insert(base);
-            pt.insert(base+5);
-            pt.insert(base+6);
-            pt.insert(base+9);
-            assert_eq!(&*pt.traverse(), [base, base+5, base+6, base+9]);
+            pt.init(start, PAGE_SIZE * 3);
         }
 
-        assert_eq!(pt.get_multiple(2), Some(base+5));
-        assert_eq!(&*pt.traverse(), [base, base+9]);
+        assert_eq!(pt.get_multiple(2), Some(base));
+        assert_eq!(&*pt.traverse(), [base+2]);
 
-        assert_eq!(pt.get(), Some(base));
-        assert_eq!(&*pt.traverse(), [base+9]);
-
-        assert_eq!(pt.get(), Some(base+9));
+        assert_eq!(pt.get(), Some(base+2));
         assert_eq!(&*pt.traverse(), []);
 
         assert_eq!(pt.get(), None);
