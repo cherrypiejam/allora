@@ -1,7 +1,7 @@
 pub mod arena;
 pub mod page;
-mod yaarena;
-mod page_tree;
+pub mod page_tree;
+pub mod yaarena;
 
 pub use page::{PAGE_SIZE, Error};
 
@@ -21,3 +21,9 @@ fn align_down(addr: usize, align: usize) -> usize {
 fn align_up(addr: usize, align: usize) -> usize {
     align_down(addr + (align - 1), align)
 }
+
+macro_rules! pa {
+    ($n:expr) => { PAGE_SIZE * $n }
+}
+
+pub(crate) use pa;

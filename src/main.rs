@@ -26,6 +26,7 @@ mod exception;
 mod timer;
 mod label;
 mod bitmap;
+mod kobject;
 
 use virtio::VirtIORegs;
 
@@ -39,6 +40,8 @@ use core::arch::{asm, global_asm};
 use core::time::Duration;
 
 use memory::arena;
+use memory::page_tree;
+use memory::PAGE_SIZE;
 
 extern "C" {
     static HEAP_START: usize;
@@ -102,8 +105,8 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 }
 
 #[global_allocator]
-static ALLOCATOR: memory::arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
-// static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
+// static ALLOCATOR: memory::arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
+static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
 static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
 
@@ -112,6 +115,9 @@ static MEM_POOL: mutex::Mutex<Option<memory::page::PageMap>> = mutex::Mutex::new
 
 // Label-specific memory allocator
 static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<memory::page::LabeledPageSet>>> = mutex::Mutex::new(None);
+
+// FIXME: must be wait-free
+static KOBJECTS: mutex::Mutex<Option<Vec<kobject::KObjectMeta<memory::yaarena::KObjectArena>>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 const APP_ENABLE: bool = false;
@@ -128,6 +134,9 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     let mut hstart = 0;
     let mut hsize = 0;
+
+    let mut mem_start = 0;
+    let mut mem_size = 0;
 
     if let Some(root) = dtb.root() {
         let size_cell = root
@@ -154,16 +163,23 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
                 unsafe {
                     let heap_start = &HEAP_START as *const _ as usize;
                     if heap_start >= addr {
+
                         hstart = heap_start;
                         hsize = size;
 
-                        let pool_start = memory::page_align_up(heap_start + size / 2);
-                        let pool_end = memory::page_align_down(heap_start + size);
-                        let pool_size = pool_end - pool_start;
-                        let heap_size = pool_start - heap_start;
+                        // let pool_start = memory::page_align_up(heap_start + size / 2);
+                        // let pool_end = memory::page_align_down(heap_start + size);
+                        // let pool_size = pool_end - pool_start;
+                        // let heap_size = pool_start - heap_start;
 
-                        ALLOCATOR.lock().init(heap_start, heap_size);
-                        MEM_POOL.lock().replace(memory::page::PageMap::new(pool_start, pool_size));
+                        ALLOCATOR.lock().init(heap_start, size / 2);
+
+                        // MEM_POOL.lock().replace(memory::page::PageMap::new(pool_start, pool_size));
+
+                        mem_start = memory::page_align_up(heap_start + size / 2);
+                        mem_size = memory::page_align_down(size / 2 / 2); // FIXME: size isn't the
+                                                                          // end of the heap
+
                         break;
                     } else {
                         panic!("{:#x} {:#x}", addr, heap_start);
@@ -255,101 +271,114 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     #[cfg(test)]
     test_main();
 
-    // let hend = hstart + hsize;
-    // UART.map(|u| writeln!(u, "heap start: {:#x}, heap end: {:#x}, heap size: {:#x}", hstart, hend, hsize));
-    // let new_hstart = memory::align_up(hstart, memory::PAGE_SIZE);
-    // let new_hend = memory::align_down(hend, memory::PAGE_SIZE);
-    // let new_hsize = hend - hstart;
-    // let num_pages = new_hsize / memory::PAGE_SIZE;
-    // UART.map(|u| writeln!(u, "heap start: {:#x}, heap end: {:#x}, heap size: {:#x}, num pages {num_pages}", new_hstart, new_hend, new_hsize));
+    // Initialize kernel objects
+    use kobject::{KObjectKind, KObjectMeta, Container};
+    use memory::yaarena::KObjectArena;
+    use memory::page_tree::PageTree;
+    use memory::pa;
 
-    // UART.map(|u| writeln!(u, "x0: {:#x}, p2 {:#x}, p3: {:#x}", dtb as *const _ as u64, p2, p3));
+    KOBJECTS.lock().replace(Vec::with_capacity(mem_size / PAGE_SIZE));
+    (0..(mem_size/PAGE_SIZE))
+        .for_each(|i| {
+            KOBJECTS.map(|ks| ks.push(KObjectMeta {
+                id: mem_start + i * PAGE_SIZE,
+                parent: None,
+                label: None,
+                alloc: None,
+                kind: KObjectKind::NoType,
+                free_pages: PageTree::empty(),
+            }));
+        });
+
+
+    UART.map(|u| writeln!(u, "heap_start: {}, heap_size: {}, mem_start: {}, mem_size: {}", hstart, hsize, mem_start, mem_size));
+
+    let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
+    let page = page_tree.get().unwrap();
+
+    let alloc = unsafe { KObjectArena::new(pa!(page), pa!(page) + PAGE_SIZE) };
+
+    KOBJECTS.map(|ks| {
+        let i = page / PAGE_SIZE;
+        ks[i].alloc = Some(alloc.clone());
+        // ks[i].label = None;
+        ks[i].kind = KObjectKind::Container;
+        ks[i].free_pages = page_tree;
+    });
+
+    let root_container = Box::new_in(Container { slots: Vec::new_in(alloc.clone()) }, alloc);
+
+    UART.map(|u| writeln!(u, "root container slots: {:?}", root_container.slots));
+
+
+    // unsafe {
+        // let c = Box::<Container<KObjectArena>, _>::new_uninit_in(alloc).assume_init();
+        // Container { slots: Vec::new_in(alloc) }
+        // let mut c = Box::<Container<KObjectArena>, _>::new_uninit_in(alloc.clone()).assume_init();
+        // c.slots = Vec::new_in(alloc);
+        // c
+    // };
+
+
     // unsafe {
         // let cur: u64;
         // asm!("mrs {}, CurrentEL",
              // out(reg) cur);
-        UART.map(|u| writeln!(u, "current el: {}, _start_addr: {:#x}", utils::current_el(), _start_addr));
+    UART.map(|u| writeln!(u, "current el: {}, _start_addr: {:#x}", utils::current_el(), _start_addr));
     // }
 
     // let heap_start = unsafe {&HEAP_START as *const _ as usize};
     // UART.map(|u| writeln!(u, "heap start: {:#x}, x3 {:#x}", heap_start, _x3));
 
-    LOCAL_MEM_POOL.lock().replace(Vec::new());
-    LOCAL_MEM_POOL.map(|plist| plist.push(memory::page::LabeledPageSet::new(label::Label::High)));
+    // LOCAL_MEM_POOL.lock().replace(Vec::new());
+    // LOCAL_MEM_POOL.map(|plist| plist.push(memory::page::LabeledPageSet::new(label::Label::High)));
 
-    for i in 0..0 {
-        // use core::alloc::Layout;
-        // use memory::PAGE_SIZE;
-
-        // Request parameters
-        // let memory   = PAGE_SIZE * 10;
-        // let label    = label::Label::High;
+    // for i in 0..0 {
+        // let page_count = 10; // # pages
+        // let label  = label::Label::High;
         // let lifetime = Duration::from_millis(1);
-        // let layout   = Layout::from_size_align(memory, PAGE_SIZE).unwrap();
 
-        let page_count = 10; // # pages
-        let label  = label::Label::High;
-        let lifetime = Duration::from_millis(1);
-
-        let page_start = MEM_POOL
-            .lock()
-            .as_mut()
-            .and_then(|p| p.get_multiple(page_count).ok())
-            .unwrap(); // ignore evict
-
-        // Push pages to label-specific allocator
-        LOCAL_MEM_POOL.map(|plist| {
-            plist.iter_mut().find(|p| p.label() == label).map(|p| p.borrow_mut().put_mutiple(page_start, page_count))
-        });
-
-        // Get pages from the label-specific allocator
-        let arena = LOCAL_MEM_POOL.lock().as_mut().and_then(|plist| {
-            plist
-                .iter_mut()
-                .find(|p| p.label() == label)
-                .map(|p| {
-                    let page_start = p.borrow_mut().get_multiple(page_count).unwrap();
-                    let arena = arena::LabeledArena::empty(label);
-                    unsafe {
-                        arena.lock().init(page_start, page_count * memory::PAGE_SIZE)
-                    }
-                    arena
-                })
-        });
-
-
-
-        // Add requested memory to the label-specific bottom level allocator.
-        // And get an allocator instance from bottom level allocator
-        // Alternatively, we can use use this as an allocator instance.
-        // let arena = ALLOCATOR
+        // let page_start = MEM_POOL
             // .lock()
-            // .split(layout)
-            // .map(|a| arena::LabeledArena::new(a, label));
+            // .as_mut()
+            // .and_then(|p| p.get_multiple(page_count).ok())
+            // .unwrap(); // ignore evict
 
-        // TODO: evict if fail to create an arena object
-        // we either kill the evicted thread / requeue it.
-        // A problem of requeue is that we find somewhere to
-        // store the userdata for re-execute or the snapshot (harder)
-        // Secondly, we might want to implement a faceted allocator
-        // to automatically handle eviction and whatever. We need
-        // to build a communication mechanism for eviction, because
-        // powering off some cpu is asynchronous.
+        // // Push pages to label-specific allocator
+        // LOCAL_MEM_POOL.map(|plist| {
+            // plist.iter_mut().find(|p| p.label() == label).map(|p| p.borrow_mut().put_mutiple(page_start, page_count))
+        // });
 
-        thread::launch(arena, lifetime, move || {
-            UART.map(|uart| {
-                let arena = thread::local_arena().unwrap();
-                let leet = Box::new_in(i + 1337, arena);
-                let _ = write!(
-                    uart,
-                    "Thread {i}:\n--- Running from core {}, label {:?}, data {}\n",
-                    utils::current_core(),
-                    arena.label(),
-                    leet,
-                );
-            });
-        });
-    }
+        // // Get pages from the label-specific allocator
+        // let arena = LOCAL_MEM_POOL.lock().as_mut().and_then(|plist| {
+            // plist
+                // .iter_mut()
+                // .find(|p| p.label() == label)
+                // .map(|p| {
+                    // let page_start = p.borrow_mut().get_multiple(page_count).unwrap();
+                    // let arena = arena::LabeledArena::empty(label);
+                    // unsafe {
+                        // arena.lock().init(page_start, page_count * memory::PAGE_SIZE)
+                    // }
+                    // arena
+                // })
+        // });
+
+        // thread::launch(arena, lifetime, move || {
+            // UART.map(|uart| {
+                // let arena = thread::local_arena().unwrap();
+                // let leet = Box::new_in(i + 1337, arena);
+                // let _ = write!(
+                    // uart,
+                    // "Thread {i}:\n--- Running from core {}, label {:?}, data {}\n",
+                    // utils::current_core(),
+                    // arena.label(),
+                    // leet,
+                // );
+            // });
+        // });
+    // }
+
 
     if APP_ENABLE {
         thread::spawn(|| {

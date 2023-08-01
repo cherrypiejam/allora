@@ -90,7 +90,7 @@ fn prepare<F: 'static + FnMut()>(mut f: F, arena: Option<LabeledArena>) -> (usiz
             arena,
         });
         let raw_conf = conf.as_mut() as *mut _;
-        let raw_arena = RawLabeledArena::from(conf.arena.as_ref().unwrap_or_else(|| &ALLOCATOR));
+        let raw_arena = RawLabeledArena::from(conf.arena.as_ref().unwrap());
         let stack = Box::new_in([0; 1024], raw_arena);
         let userdata = Box::new_in(move || {
             gic::init();

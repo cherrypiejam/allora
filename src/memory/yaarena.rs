@@ -6,6 +6,7 @@ use super::{align_up, align_down};
 
 use crate::mutex::Mutex;
 
+#[derive(Debug)]
 struct CanAllocInfo {
     start: usize,
     end: usize,
@@ -13,6 +14,7 @@ struct CanAllocInfo {
     alloc_end_offset: usize,
 }
 
+#[derive(Debug, Clone)]
 struct Chunk {
     size: usize,
     next: Option<NonNull<Chunk>>,
@@ -43,6 +45,8 @@ impl Chunk {
     }
 }
 
+// TODO: make it non-blocking
+#[derive(Debug, Clone)]
 struct ChunkList {
     head: Chunk,
 }
@@ -171,9 +175,12 @@ impl ChunkList {
     }
 }
 
+#[derive(Debug)]
 pub struct Arena {
     chunks: ChunkList,
 }
+
+unsafe impl Send for Arena {}
 
 impl Arena {
     pub const fn empty() -> Arena {
@@ -215,12 +222,64 @@ unsafe impl<'a> Allocator for &'a Mutex<Arena> {
     }
 }
 
+#[derive(Debug)]
+pub struct KObjectArena {
+    arena: alloc::sync::Arc<Mutex<Arena>>, // TODO arc uses global heap
+}
+
+impl KObjectArena {
+    pub fn empty() -> Self {
+        KObjectArena {
+            arena: alloc::sync::Arc::new(Mutex::new(Arena::empty()))
+        }
+    }
+
+    pub unsafe fn new(start: usize, size: usize) -> Self {
+        KObjectArena {
+            arena: alloc::sync::Arc::new(Mutex::new(Arena::new(start, size)))
+        }
+    }
+}
+
+unsafe impl<'a> Allocator for KObjectArena {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.arena
+            .lock()
+            .allocate(layout)
+            .map(|p| NonNull::slice_from_raw_parts(p, layout.size()))
+            .ok_or_else(|| AllocError)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        self.arena
+            .lock()
+            .deallocate(ptr, layout)
+    }
+}
+
+impl Clone for KObjectArena {
+    fn clone(&self) -> Self {
+        KObjectArena { arena: alloc::sync::Arc::clone(&self.arena) }
+    }
+}
+
+// #[derive(Debug)]
+// pub struct KObjectArena {
+    // pub arena: Mutex<Arena>,
+    // refs: core::sync::atomic::AtomicUsize,
+// }
+
+// impl Clone for KObjectArena {
+    // fn clone(&self) -> Self {
+        // self.refs.fetch_add(1, core::sync::atomic::Ordering::SeqCst)
+    // }
+// }
+
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::*;
-    // use core::alloc::Layout;
     const SIZE: usize = 500_000_000;
 
     fn init_arena(size: usize) -> Mutex<Arena> {

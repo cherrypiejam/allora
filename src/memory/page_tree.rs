@@ -52,14 +52,23 @@ pub struct PageTree {
     root: PageLink,
 }
 
+unsafe impl Send for PageTree {}
+
 impl PageTree {
-    pub fn new() -> PageTree {
+    pub fn empty() -> PageTree {
         PageTree { root: None }
+    }
+
+    pub unsafe fn new(start: usize, size: usize) -> PageTree {
+        let mut pt = Self::empty();
+        pt.init(start, size);
+        pt
     }
 
     pub unsafe fn init(&mut self, start: usize, size: usize) {
         let base = page_align_up(start) / PAGE_SIZE;
         let npages = page_align_down(size) / PAGE_SIZE;
+
         (base..base+npages)
             .for_each(|n| self.insert(n))
     }
@@ -161,7 +170,7 @@ impl PageTree {
     }
 
     pub fn get_multiple(&mut self, npages: usize) -> Option<usize> {
-        let pages = unsafe { self.traverse() };
+        let pages = self.traverse(); // FIXME: this traverse all pages
         (0..(pages.len()-(npages-1)))
             .find(|&i| ((i+1)..(i+npages)).all(|j| pages[j - 1] + 1 == pages[j]))
             .map(|i| {
@@ -309,10 +318,11 @@ impl PageTree {
         }
     }
 
-    pub fn traverse(&mut self) -> heapless::Vec<usize, 128> {
-        let mut stack = heapless::Vec::<PageLink, 128>::new();
-        let mut items = heapless::Vec::<usize, 128>::new();
-        let mut visited = heapless::LinearMap::<PageLink, (), 128>::new();
+    // FIXME: failed after exceeding limits
+    pub fn traverse(&mut self) -> heapless::Vec<usize, 1024> {
+        let mut stack = heapless::Vec::<PageLink, 1024>::new();
+        let mut items = heapless::Vec::<usize, 1024>::new();
+        let mut visited = heapless::LinearMap::<PageLink, (), 1024>::new();
         if self.root.is_some() {
             stack.push(self.root).unwrap();
         }
@@ -422,8 +432,8 @@ mod test {
     const SIZE: usize = 500_000_000;
 
     #[test_case]
-    fn test_page_tree() {
-        let mut pt = PageTree::new();
+    fn test_page_tree_primitives() {
+        let mut pt = PageTree::empty();
         let base = unsafe { &HEAP_START } as *const _ as usize + SIZE;
         let base = page_align_up(base) / PAGE_SIZE;
 
@@ -455,7 +465,7 @@ mod test {
 
     #[test_case]
     fn test_page_tree() {
-        let mut pt = PageTree::new();
+        let mut pt = PageTree::empty();
         let start = unsafe { &HEAP_START } as *const _ as usize + SIZE;
         let base = page_align_up(start) / PAGE_SIZE;
 
