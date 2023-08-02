@@ -273,7 +273,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // Initialize kernel objects
     use kobject::{KObjectKind, KObjectMeta, Container};
-    use mm::yaarena::KObjectArena;
+    use mm::koarena::KObjectArena;
     use mm::page_tree::PageTree;
     use mm::{page_align_up, page_align_down, pa};
     use core::mem::size_of;

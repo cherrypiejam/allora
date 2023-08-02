@@ -1,55 +1,70 @@
 use core::ptr::NonNull;
 use core::alloc::{Layout, Allocator, AllocError};
 
-use super::chunk_list::ChunkList;
+use super::yaarena::Arena;
 use crate::mutex::Mutex;
 
 #[derive(Debug)]
-pub struct Arena {
-    chunks: ChunkList,
+pub struct KObjectArena {
+    arena: alloc::sync::Arc<Mutex<Arena>>, // TODO arc uses global heap
 }
 
-unsafe impl Send for Arena {}
-
-impl Arena {
-    pub const fn empty() -> Arena {
-        Self { chunks: ChunkList::empty() }
+impl KObjectArena {
+    pub fn empty() -> Self {
+        KObjectArena {
+            arena: alloc::sync::Arc::new(Mutex::new(Arena::empty()))
+        }
     }
 
-    pub unsafe fn new(start: usize, size: usize) -> Arena {
-        Self { chunks: ChunkList::new(start, size) }
+    pub unsafe fn new(start: usize, size: usize) -> Self {
+        KObjectArena {
+            arena: alloc::sync::Arc::new(Mutex::new(Arena::new(start, size)))
+        }
     }
 
-    pub unsafe fn append(&mut self, start: usize, size: usize) {
-        self.chunks.append(start, size)
+    pub fn as_ref(&self) -> &alloc::sync::Arc<Mutex<Arena>> {
+        &self.arena
     }
 
-    pub fn allocate(&mut self, layout: Layout) -> Option<NonNull<u8>> {
-        let layout = ChunkList::align_layout(layout);
-        self.chunks.pop_first_fit(layout)
-    }
-
-    pub unsafe fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) {
-        self.chunks.push(
-            ptr.as_ptr() as usize,
-            ChunkList::align_layout(layout).size(),
-        )
+    pub fn as_mut(&mut self) -> &mut alloc::sync::Arc<Mutex<Arena>> {
+        &mut self.arena
     }
 }
 
-unsafe impl<'a> Allocator for &'a Mutex<Arena> {
+unsafe impl<'a> Allocator for KObjectArena {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        self.lock()
+        self.arena
+            .lock()
             .allocate(layout)
             .map(|p| NonNull::slice_from_raw_parts(p, layout.size()))
             .ok_or_else(|| AllocError)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        self.lock()
+        self.arena
+            .lock()
             .deallocate(ptr, layout)
     }
 }
+
+impl Clone for KObjectArena {
+    fn clone(&self) -> Self {
+        KObjectArena { arena: alloc::sync::Arc::clone(&self.arena) }
+    }
+}
+
+// #[derive(Debug)]
+// pub struct KObjectArena {
+    // pub arena: Mutex<Arena>,
+    // refs: core::sync::atomic::AtomicUsize,
+// }
+
+// impl Clone for KObjectArena {
+    // fn clone(&self) -> Self {
+        // self.refs.fetch_add(1, core::sync::atomic::Ordering::SeqCst)
+    // }
+// }
+
 
 #[cfg(test)]
 mod test {

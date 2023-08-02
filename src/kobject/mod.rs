@@ -1,11 +1,9 @@
 mod container;
 pub use container::Container;
 
-use core::alloc::Allocator;
-
 use crate::label::Buckle;
 use crate::mm::page_tree::PageTree;
-use crate::mm::yaarena::KObjectArena;
+use crate::mm::koarena::KObjectArena;
 
 type KObjectRef = usize;
 
