@@ -4,8 +4,8 @@ pub use container::Container;
 use core::alloc::Allocator;
 
 use crate::label::Buckle;
-use crate::memory::page_tree::PageTree;
-use crate::memory::yaarena::KObjectArena;
+use crate::mm::page_tree::PageTree;
+use crate::mm::yaarena::KObjectArena;
 
 type KObjectRef = usize;
 

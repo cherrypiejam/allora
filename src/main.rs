@@ -21,7 +21,7 @@ pub mod utils;
 pub mod virtio;
 
 mod apps;
-mod memory;
+mod mm;
 mod exception;
 mod timer;
 mod label;
@@ -39,9 +39,9 @@ use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
 use core::time::Duration;
 
-use memory::arena;
-use memory::page_tree;
-use memory::PAGE_SIZE;
+use mm::arena;
+use mm::page_tree;
+use mm::PAGE_SIZE;
 
 extern "C" {
     static HEAP_START: usize;
@@ -111,10 +111,10 @@ static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::Loc
 static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
 
 // Top-level memory allocator
-static MEM_POOL: mutex::Mutex<Option<memory::page::PageMap>> = mutex::Mutex::new(None);
+static MEM_POOL: mutex::Mutex<Option<mm::page::PageMap>> = mutex::Mutex::new(None);
 
 // Label-specific memory allocator
-static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<memory::page::LabeledPageSet>>> = mutex::Mutex::new(None);
+static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<mm::page::LabeledPageSet>>> = mutex::Mutex::new(None);
 
 // FIXME: must be wait-free
 static KOBJECTS: mutex::Mutex<Option<(Vec<kobject::KObjectMeta>, usize)>> = mutex::Mutex::new(None);
@@ -176,8 +176,8 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
                         // MEM_POOL.lock().replace(memory::page::PageMap::new(pool_start, pool_size));
 
-                        mem_start = memory::page_align_up(heap_start + size / 2);
-                        mem_size = memory::page_align_down(size / 2 / 2); // FIXME: size isn't the
+                        mem_start = mm::page_align_up(heap_start + size / 2);
+                        mem_size = mm::page_align_down(size / 2 / 2); // FIXME: size isn't the
                                                                           // end of the heap
 
                         break;
@@ -273,9 +273,9 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // Initialize kernel objects
     use kobject::{KObjectKind, KObjectMeta, Container};
-    use memory::yaarena::KObjectArena;
-    use memory::page_tree::PageTree;
-    use memory::{page_align_up, page_align_down, pa};
+    use mm::yaarena::KObjectArena;
+    use mm::page_tree::PageTree;
+    use mm::{page_align_up, page_align_down, pa};
     use core::mem::size_of;
 
     KOBJECTS.lock().replace((
