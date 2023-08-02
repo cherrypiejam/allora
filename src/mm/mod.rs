@@ -25,7 +25,7 @@ fn align_up(addr: usize, align: usize) -> usize {
 }
 
 macro_rules! pa {
-    ($n:expr) => { PAGE_SIZE * $n }
+    ($n:expr) => { crate::mm::PAGE_SIZE * $n }
 }
 
 pub(crate) use pa;

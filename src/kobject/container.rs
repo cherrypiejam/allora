@@ -1,4 +1,3 @@
-use core::alloc::Allocator;
 use alloc::vec::Vec;
 
 use super::{KObjectRef, KObjectArena};
