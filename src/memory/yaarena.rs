@@ -239,6 +239,14 @@ impl KObjectArena {
             arena: alloc::sync::Arc::new(Mutex::new(Arena::new(start, size)))
         }
     }
+
+    pub fn as_ref(&self) -> &alloc::sync::Arc<Mutex<Arena>> {
+        &self.arena
+    }
+
+    pub fn as_mut(&mut self) -> &mut alloc::sync::Arc<Mutex<Arena>> {
+        &mut self.arena
+    }
 }
 
 unsafe impl<'a> Allocator for KObjectArena {

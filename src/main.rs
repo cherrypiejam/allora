@@ -117,7 +117,7 @@ static MEM_POOL: mutex::Mutex<Option<memory::page::PageMap>> = mutex::Mutex::new
 static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<memory::page::LabeledPageSet>>> = mutex::Mutex::new(None);
 
 // FIXME: must be wait-free
-static KOBJECTS: mutex::Mutex<Option<Vec<kobject::KObjectMeta<memory::yaarena::KObjectArena>>>> = mutex::Mutex::new(None);
+static KOBJECTS: mutex::Mutex<Option<(Vec<kobject::KObjectMeta>, usize)>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 const APP_ENABLE: bool = false;
@@ -275,16 +275,20 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     use kobject::{KObjectKind, KObjectMeta, Container};
     use memory::yaarena::KObjectArena;
     use memory::page_tree::PageTree;
-    use memory::pa;
+    use memory::{page_align_up, page_align_down, pa};
+    use core::mem::size_of;
 
-    KOBJECTS.lock().replace(Vec::with_capacity(mem_size / PAGE_SIZE));
+    KOBJECTS.lock().replace((
+        Vec::with_capacity(page_align_down(mem_size) / PAGE_SIZE),
+        page_align_up(mem_start) / PAGE_SIZE,
+    ));
     (0..(mem_size/PAGE_SIZE))
         .for_each(|i| {
-            KOBJECTS.map(|ks| ks.push(KObjectMeta {
-                id: mem_start + i * PAGE_SIZE,
+            KOBJECTS.map(|(ks, ofs)| ks.push(KObjectMeta {
+                id: *ofs + i,
                 parent: None,
                 label: None,
-                alloc: None,
+                alloc: KObjectArena::empty(),
                 kind: KObjectKind::NoType,
                 free_pages: PageTree::empty(),
             }));
@@ -296,18 +300,26 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
     let page = page_tree.get().unwrap();
 
-    let alloc = unsafe { KObjectArena::new(pa!(page), pa!(page) + PAGE_SIZE) };
 
-    KOBJECTS.map(|ks| {
-        let i = page / PAGE_SIZE;
-        ks[i].alloc = Some(alloc.clone());
-        // ks[i].label = None;
-        ks[i].kind = KObjectKind::Container;
-        ks[i].free_pages = page_tree;
+    // let alloc = unsafe { KObjectArena::new(pa!(page), pa!(page) + PAGE_SIZE) };
+
+    KOBJECTS.map(|(ks, ofs)| {
+        let rootc = &mut ks[page - *ofs];
+        // rootc.label = None;
+        rootc.kind = KObjectKind::Container;
+        rootc.free_pages = page_tree;
+        unsafe {
+            rootc.alloc.as_mut().lock().append(
+                pa!(page) + size_of::<Container>(),
+                PAGE_SIZE - size_of::<Container>(),
+            );
+            (pa!(page) as *mut Container)
+                .write(Container { slots: Vec::new_in(rootc.alloc.clone()) });
+        }
     });
 
-    let root_container = Box::new_in(Container { slots: Vec::new_in(alloc.clone()) }, alloc);
 
+    let root_container = unsafe { (pa!(page) as *mut Container).as_mut().unwrap() };
     UART.map(|u| writeln!(u, "root container slots: {:?}", root_container.slots));
 
 
