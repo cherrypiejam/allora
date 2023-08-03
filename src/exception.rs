@@ -67,12 +67,6 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
     match info.desc {
         Description::CurrentElSPx => match info.kind {
             Kind::IRQ => {
-                // FIXME: potential issue, an interrupt is triggered
-                // but the info is corrupted.
-                // e.g. <><><><><> 0A { ate: , address: , x: panicked at 'not implemented: Info { kind: qemu-system-aarch64: terminating on signal 2 from pid 76610 (<unknown process>)
-                // heap allocation may use this memory for exception handler?
-                // check the argument passed in the exception handler in exception.S
-                // the argument is corrupted
                 for &(irq, handler) in INTERRUPTS.iter() {
                     if gic::is_pending(irq) {
                         handler(irq, frame);
@@ -91,7 +85,7 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
 }
 
 fn timer_interrupt_handler(_irq: u32, _frame: &Frame) {
-    // UART.map(|u| write!(u, "."));
+    // crate::UART.map(|u| { use core::fmt::Write; write!(u, ".") });
     timer::tick();
 }
 
@@ -103,7 +97,7 @@ fn cpu_power_down_handler(irq: u32, _: &Frame) {
 pub fn load_table() {
     unsafe {
         asm!("ldr x0, =exception_vector_table",
-             "msr VBAR_EL1, x0");
+             "msr VBAR_EL2, x0");
     }
     interrupt_enable();
 }

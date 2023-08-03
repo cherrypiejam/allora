@@ -7,9 +7,10 @@ use crate::WAIT_LIST;
 use crate::exception::InterruptIndex;
 
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
+// pub const EL1_PHYSICAL_TIMER: u32 = 26;
 const SYS_FREQ: u32 = 62_500_000; // 62.5 MHz
 
-const TIMER_FREQ: u32 = 100; // TODO switch to 1000
+const TIMER_FREQ: u32 = 100;
 const TIMER_TVAL: u32 = SYS_FREQ / TIMER_FREQ;
 
 static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -17,7 +18,7 @@ static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
 pub fn init_timer(irq: GIC) {
     unsafe {
         asm!("mov x0, {:x}",            // Set system clock frequency. The cortex-a53 board
-             "msr CNTFRQ_EL0, x0",      // uses a fixed val of 62.5 MHz in Qemu
+             "msr CNTFRQ_EL0, x0",      // uses a fixed value of 62.5 MHz in QEMU
 
              "msr CNTP_TVAL_EL0, {:x}", // Set timer frequency and enable it
              "isb",

@@ -266,6 +266,8 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         }
     }
 
+
+
     WAIT_LIST.lock().replace(Vec::new());
 
     #[cfg(test)]
@@ -301,8 +303,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     let page = page_tree.get().unwrap();
 
 
-    // let alloc = unsafe { KObjectArena::new(pa!(page), pa!(page) + PAGE_SIZE) };
-
     KOBJECTS.map(|(ks, ofs)| {
         let rootc = &mut ks[page - *ofs];
         // rootc.label = None;
@@ -323,73 +323,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     UART.map(|u| writeln!(u, "root container slots: {:?}", root_container.slots));
 
 
-    // unsafe {
-        // let c = Box::<Container<KObjectArena>, _>::new_uninit_in(alloc).assume_init();
-        // Container { slots: Vec::new_in(alloc) }
-        // let mut c = Box::<Container<KObjectArena>, _>::new_uninit_in(alloc.clone()).assume_init();
-        // c.slots = Vec::new_in(alloc);
-        // c
-    // };
-
-
-    // unsafe {
-        // let cur: u64;
-        // asm!("mrs {}, CurrentEL",
-             // out(reg) cur);
     UART.map(|u| writeln!(u, "current el: {}, _start_addr: {:#x}", utils::current_el(), _start_addr));
-    // }
-
-    // let heap_start = unsafe {&HEAP_START as *const _ as usize};
-    // UART.map(|u| writeln!(u, "heap start: {:#x}, x3 {:#x}", heap_start, _x3));
-
-    // LOCAL_MEM_POOL.lock().replace(Vec::new());
-    // LOCAL_MEM_POOL.map(|plist| plist.push(memory::page::LabeledPageSet::new(label::Label::High)));
-
-    // for i in 0..0 {
-        // let page_count = 10; // # pages
-        // let label  = label::Label::High;
-        // let lifetime = Duration::from_millis(1);
-
-        // let page_start = MEM_POOL
-            // .lock()
-            // .as_mut()
-            // .and_then(|p| p.get_multiple(page_count).ok())
-            // .unwrap(); // ignore evict
-
-        // // Push pages to label-specific allocator
-        // LOCAL_MEM_POOL.map(|plist| {
-            // plist.iter_mut().find(|p| p.label() == label).map(|p| p.borrow_mut().put_mutiple(page_start, page_count))
-        // });
-
-        // // Get pages from the label-specific allocator
-        // let arena = LOCAL_MEM_POOL.lock().as_mut().and_then(|plist| {
-            // plist
-                // .iter_mut()
-                // .find(|p| p.label() == label)
-                // .map(|p| {
-                    // let page_start = p.borrow_mut().get_multiple(page_count).unwrap();
-                    // let arena = arena::LabeledArena::empty(label);
-                    // unsafe {
-                        // arena.lock().init(page_start, page_count * memory::PAGE_SIZE)
-                    // }
-                    // arena
-                // })
-        // });
-
-        // thread::launch(arena, lifetime, move || {
-            // UART.map(|uart| {
-                // let arena = thread::local_arena().unwrap();
-                // let leet = Box::new_in(i + 1337, arena);
-                // let _ = write!(
-                    // uart,
-                    // "Thread {i}:\n--- Running from core {}, label {:?}, data {}\n",
-                    // utils::current_core(),
-                    // arena.label(),
-                    // leet,
-                // );
-            // });
-        // });
-    // }
 
 
     if APP_ENABLE {

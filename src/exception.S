@@ -119,11 +119,6 @@ context_restore:
     eret
 .endm
 
-// go_system_off:
-    // bl system_off
-    // eret
-
-
 .balign 0x800
 .globl exception_vector_table
 exception_vector_table:

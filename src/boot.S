@@ -30,6 +30,12 @@ _start:
     // isb
     /* -- */
 
+    /* Route exceptions to EL2 */
+    mrs x3, HCR_EL2
+    orr x3, x3, (1 << 27)
+    msr HCR_EL2, x3
+    isb
+
     ldr     x30, =LD_STACK_PTR0
     mov     sp, x30
     bl      kernel_main
