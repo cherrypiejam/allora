@@ -7,7 +7,6 @@ use crate::WAIT_LIST;
 use crate::exception::InterruptIndex;
 
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
-// pub const EL1_PHYSICAL_TIMER: u32 = 26;
 const SYS_FREQ: u32 = 62_500_000; // 62.5 MHz
 
 const TIMER_FREQ: u32 = 100;
