@@ -1,3 +1,5 @@
+use core::mem::size_of;
+
 mod container;
 mod label;
 mod thread;
@@ -9,10 +11,11 @@ pub use thread::Thread;
 use crate::label::Buckle;
 use crate::mm::page_tree::PageTree;
 use crate::mm::koarena::KObjectArena;
-use crate::mm::pa;
+use crate::mm::{pa, PAGE_SIZE};
 use crate::KOBJECTS;
 
 type KObjectRef = usize;
+const INVALID_KOBJECT_REF: usize = usize::MAX;
 
 // All metadata are stored in a global array, indexed by its page number
 // All KO object are stored at the beginning of their page
@@ -26,41 +29,62 @@ pub struct KObjectMeta {
 }
 
 pub enum KObjectKind {
-    NoType,
+    None,
     Container,
     Label,
     Thread,
     Page(KObjectRef),
 }
 
-pub enum KObjectType {
-    Container(KObjectRef),
-}
+// pub enum KObjectType {
+    // Container(KObjectRef),
+// }
 
 // Safety: ?
-trait IsKObjectRef<'a> {
-    fn meta(&self) -> &'a KObjectMeta;
-    fn meta_mut(&self) -> &'a mut KObjectMeta;
-    fn container(&self) -> &'a Container;
+trait IsKObjectRef {
+    fn map_meta<U, F: FnMut(&mut KObjectMeta) -> U>(&self, f: F) -> Option<U>;
+    // fn meta(&self) -> &'a KObjectMeta;
+    // fn meta_mut(&self) -> &'a mut KObjectMeta;
+    // fn container(&self) -> &'a Container;
     // fn container_mut(&mut self) -> &'a mut Container;
 }
 
-impl<'a> IsKObjectRef<'a> for KObjectRef {
-    fn meta(&self) -> &'a KObjectMeta {
-        todo!()
+impl<'a> IsKObjectRef for KObjectRef {
+
+    fn map_meta<U, F: FnMut(&mut KObjectMeta) -> U>(&self, mut f: F) -> Option<U> {
+        KOBJECTS
+            .map(|(ks, ofs)| {
+                let id = *self - *ofs;
+                f(&mut ks[id])
+            })
     }
 
-    fn meta_mut(&self) -> &'a mut KObjectMeta {
-        todo!()
-    }
 
-    fn container(&self) -> &'a Container {
-        unsafe {
-            (pa!(*self) as *mut Container)
-                .as_ref()
-                .unwrap()
-        }
-    }
+    // fn meta(&self) -> &'a KObjectMeta {
+        // KOBJECTS
+            // .map(|(ks, ofs)| {
+                // let id = *self - *ofs;
+                // &ks[id]
+            // })
+            // .unwrap()
+    // }
+
+    // fn meta_mut(&self) -> &'a mut KObjectMeta {
+        // KOBJECTS
+            // .map(|(ks, ofs)| {
+                // let id = *self - *ofs;
+                // &mut ks[id]
+            // })
+            // .unwrap()
+    // }
+
+    // fn container(&self) -> &'a Container {
+        // unsafe {
+            // (pa!(*self) as *mut Container)
+                // .as_ref()
+                // .unwrap()
+        // }
+    // }
 }
 
 fn is_valid_kobj(koref: KObjectRef) -> bool {
@@ -71,7 +95,7 @@ fn is_valid_kobj(koref: KObjectRef) -> bool {
             let index = koref - *ofs;
             if index < ks.len() {
                 match ks[index].kind {
-                    KObjectKind::NoType | KObjectKind::Page(_) => None,
+                    KObjectKind::None | KObjectKind::Page(_) => None,
                     _ => Some(()),
                 }
             } else {
@@ -79,4 +103,24 @@ fn is_valid_kobj(koref: KObjectRef) -> bool {
             }
         })
         .is_some()
+}
+
+unsafe fn kobject_create(kind: KObjectKind, page: usize) -> KObjectRef {
+    KOBJECTS.map(|(ks, ofs)| {
+        let ct_id = page - *ofs;
+        let ct_meta = &mut ks[ct_id];
+
+        match kind {
+            KObjectKind::Container => {
+                ct_meta.kind = KObjectKind::Container;
+                ct_meta.alloc.as_mut().lock().append(
+                    pa!(page) + size_of::<Container>(),
+                    PAGE_SIZE - size_of::<Container>(),
+                );
+            }
+            _ => unimplemented!(),
+        }
+    });
+
+    page
 }

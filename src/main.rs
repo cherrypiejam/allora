@@ -295,7 +295,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
                 parent: None,
                 label: None,
                 alloc: KObjectArena::empty(),
-                kind: KObjectKind::NoType,
+                kind: KObjectKind::None,
                 free_pages: PageTree::empty(),
             }));
         });

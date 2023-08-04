@@ -26,9 +26,7 @@ type ThreadBox = Thread<Box<dyn FnMut(), crate::mm::koarena::KObjectArena>>;
 
 #[no_mangle]
 pub unsafe extern "C" fn switch(curr: *mut ThreadBox, next: *mut ThreadBox) {
-
     context_stack!();
-
 
     let curr: *mut ThreadBox;
     let next: *mut ThreadBox;
@@ -44,15 +42,6 @@ pub unsafe extern "C" fn switch(curr: *mut ThreadBox, next: *mut ThreadBox) {
 
     sp = next_thread.saved.sp;
     asm!("mov sp, {}", in(reg) sp);
-
-    // let mut sp: usize;
-    // let sp2: usize;
-    // asm!("mov {}, sp", out(reg) sp);
-    // thread.switch_sp = sp;
-    // sp = next_thread.switch_sp;
-    // asm!("mov {}, sp", out(reg) sp2);
-    // panic!("--- {:p}, {:p}", curr, next);
-    // asm!("mov sp, {}", in(reg) sp);
 
     context_restore!();
 }
