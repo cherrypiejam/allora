@@ -27,12 +27,17 @@ mod timer;
 mod label;
 mod bitmap;
 mod kobject;
+mod schedule;
+mod switch;
 
 use virtio::VirtIORegs;
 
 #[cfg(target_arch = "aarch64")]
-global_asm!(include_str!("boot.S"));
-global_asm!(include_str!("exception.S"));
+global_asm!(
+    include_str!("boot.S"),
+    include_str!("exception.S"),
+    include_str!("switch.S"),
+);
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
@@ -108,7 +113,7 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 // static ALLOCATOR: memory::arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
 static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
-static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
+// static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
 
 // Top-level memory allocator
 static MEM_POOL: mutex::Mutex<Option<mm::page::PageMap>> = mutex::Mutex::new(None);
@@ -267,8 +272,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     }
 
 
-
-    WAIT_LIST.lock().replace(Vec::new());
+    // WAIT_LIST.lock().replace(Vec::new());
 
     #[cfg(test)]
     test_main();
@@ -323,39 +327,45 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     UART.map(|u| writeln!(u, "root container slots: {:?}", root_container.slots));
 
 
-    UART.map(|u| writeln!(u, "current el: {}, _start_addr: {:#x}", utils::current_el(), _start_addr));
+    UART.map(|u| writeln!(u, "EL: {}, CORE: {}, _start_addr: {:#x}", utils::current_el(), utils::current_core(), _start_addr));
 
-
-    if APP_ENABLE {
-        thread::spawn(|| {
-            UART.map(|uart| {
-                let _ = write!(uart, "Running from core {}\n", utils::current_core());
-            });
-            let mut shell = apps::shell::Shell {
-                blk: &BLK,
-                entropy: &ENTROPY,
-            };
-            apps::shell::main(&UART, &mut shell);
+    thread::spawn(root_container, || {
+        UART.map(|uart| {
+            let _ = write!(uart, "Running from core {}\n", utils::current_core());
         });
+    });
 
-        UART.lock()
-            .as_mut()
-            .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
 
-        thread::spawn(|| {
-            UART.map(|uart| {
-                let _ = write!(uart, "Running from core {}\n", utils::current_core());
-            });
-            NET.map(|mut net| {
-                let mut shell = apps::shell::Shell {
-                    blk: &BLK,
-                    entropy: &ENTROPY,
-                };
-                apps::net::Net { net: &mut net }.run(&mut shell)
-            });
-        });
+    // if APP_ENABLE {
+        // thread::spawn(|| {
+            // UART.map(|uart| {
+                // let _ = write!(uart, "Running from core {}\n", utils::current_core());
+            // });
+            // let mut shell = apps::shell::Shell {
+                // blk: &BLK,
+                // entropy: &ENTROPY,
+            // };
+            // apps::shell::main(&UART, &mut shell);
+        // });
 
-    }
+        // UART.lock()
+            // .as_mut()
+            // .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
+
+        // thread::spawn(|| {
+            // UART.map(|uart| {
+                // let _ = write!(uart, "Running from core {}\n", utils::current_core());
+            // });
+            // NET.map(|mut net| {
+                // let mut shell = apps::shell::Shell {
+                    // blk: &BLK,
+                    // entropy: &ENTROPY,
+                // };
+                // apps::net::Net { net: &mut net }.run(&mut shell)
+            // });
+        // });
+
+    // }
 
     loop {
         unsafe {

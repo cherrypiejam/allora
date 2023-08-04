@@ -1,5 +1,5 @@
 use crate::{timer, gic};
-use crate::thread::cpu_off_graceful;
+// use crate::thread::cpu_off_graceful;
 
 use core::arch::asm;
 use core::fmt::Write;
@@ -91,7 +91,7 @@ fn timer_interrupt_handler(_irq: u32, _frame: &Frame) {
 
 fn cpu_power_down_handler(irq: u32, _: &Frame) {
     gic::clear_soft(irq); // Must clear before power off
-    cpu_off_graceful();
+    // cpu_off_graceful();
 }
 
 pub fn load_table() {

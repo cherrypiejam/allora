@@ -4,6 +4,7 @@ mod thread;
 
 pub use container::Container;
 pub use label::Label;
+pub use thread::Thread;
 
 use crate::label::Buckle;
 use crate::mm::page_tree::PageTree;

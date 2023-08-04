@@ -7,11 +7,11 @@ _start:
      */
     adr x1, .
     mrs x2, TTBR0_EL1
-    cmp x0,  #0
-    mov x0, #0x40000000
+    cmp x0, 0
+    mov x0, 0x40000000
 
     /* Enable NEON/SIMD instructions */
-    mov x30, #(0x3 << 20)
+    mov x30, (0x3 << 20)
     msr cpacr_el1, x30
     // msr cptr_el2, x30
     isb
@@ -35,6 +35,7 @@ _start:
     orr x3, x3, (1 << 27)
     msr HCR_EL2, x3
     isb
+    /* -- */
 
     ldr     x30, =LD_STACK_PTR0
     mov     sp, x30
