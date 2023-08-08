@@ -6,6 +6,7 @@ use crate::kobject::{KObjectKind, Container, Thread};
 use crate::schedule::schedule;
 use crate::{KOBJECTS, PAGE_SIZE};
 use crate::mm::{pa, koarena::KObjectArena};
+use crate::exception::with_intr_disabled;
 
 pub const TIME_SLICE: u64 = 4;
 
@@ -76,8 +77,15 @@ pub fn spawn<F: FnMut() + 'static>(ct: &mut Container, mut f: F) {
 
 }
 
+
 pub fn yield_to_next() {
     schedule();
+}
+
+pub fn yield_with_insr_disabled() {
+    with_intr_disabled(|| {
+        schedule();
+    })
 }
 
 

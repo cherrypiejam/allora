@@ -51,4 +51,6 @@ impl Container {
     pub fn set_slot(&mut self, slot_id: usize, ko_ref: KObjectRef) {
         self.slots[slot_id] = ko_ref;
     }
+
+    fn free() {}
 }

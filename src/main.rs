@@ -21,11 +21,11 @@ pub mod utils;
 pub mod virtio;
 
 mod apps;
+mod collections;
 mod mm;
 mod exception;
 mod timer;
 mod label;
-mod bitmap;
 mod kobject;
 mod schedule;
 mod switch;
@@ -110,10 +110,7 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 }
 
 #[global_allocator]
-// static ALLOCATOR: memory::arena::LabeledArena = arena::LabeledArena::empty(label::Label::Low);
 static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
-
-// static WAIT_LIST: mutex::Mutex<Option<Vec<thread::Task>>> = mutex::Mutex::new(None);
 
 // Top-level memory allocator
 static MEM_POOL: mutex::Mutex<Option<mm::page::PageMap>> = mutex::Mutex::new(None);
@@ -123,7 +120,6 @@ static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<mm::page::LabeledPageSet>>> = mut
 
 // LEAK: must be wait-free
 static KOBJECTS: mutex::Mutex<Option<(Vec<kobject::KObjectMeta>, usize)>> = mutex::Mutex::new(None);
-
 static READY_LIST: mutex::Mutex<Option<Vec<kobject::KObjectRef>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);

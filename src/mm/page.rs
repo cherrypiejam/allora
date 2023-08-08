@@ -3,7 +3,7 @@ use core::ops::DerefMut;
 
 use alloc::collections::BTreeMap;
 
-use crate::bitmap::Bitmap;
+use crate::collections::bitmap::Bitmap;
 use crate::label::Label;
 
 const PAGE_BITS: usize = 12;

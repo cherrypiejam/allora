@@ -6,7 +6,7 @@ use core::alloc::{Layout, Allocator, GlobalAlloc, AllocError};
 
 use crate::mutex::{Mutex, MutexGuard};
 use crate::label::Label;
-use crate::bitmap::Bitmap;
+use crate::collections::bitmap::Bitmap;
 
 use super::PAGE_SIZE;
 use super::{align_up, align_down};
