@@ -3,6 +3,7 @@ use core::arch::asm;
 use alloc::boxed::Box;
 
 use crate::kobject::{KObjectKind, Container, Thread};
+use crate::schedule::schedule;
 use crate::{KOBJECTS, PAGE_SIZE};
 use crate::mm::{pa, koarena::KObjectArena};
 
@@ -73,6 +74,12 @@ pub fn spawn<F: FnMut() + 'static>(ct: &mut Container, mut f: F) {
 
     });
 
+}
+
+pub fn yield_to_next() {
+    // use core::fmt::Write;
+    // crate::UART.map(|u| writeln!(u, "yield"));
+    schedule();
 }
 
 

@@ -29,10 +29,6 @@ impl Thread {
         let th_ref = kobject_create(KObjectKind::Thread, pg);
         let th_ptr = pa!(th_ref) as *mut Thread;
 
-        // panic!("{:?}, th_ref {:?}", th_ptr, th_ref);
-        // (pa!(th_ref) as *mut usize).write(100);
-
-
         th_ref.map_meta(|th_meta| {
             th_ptr.write(Thread {
                 main: thread_start,
@@ -41,7 +37,6 @@ impl Thread {
                 userdata: Box::new_in(move || f(), th_meta.alloc.clone()),
             });
         });
-
 
         th_ref
     }

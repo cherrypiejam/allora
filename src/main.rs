@@ -224,7 +224,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
                     irqs.into_iter().find(|&irq| irq == timer::EL1_PHYSICAL_TIMER)
                 })
                 .flatten() {
-                timer::init_timer(unsafe { gic::GIC::new(irq) });
+                // timer::init_timer(unsafe { gic::GIC::new(irq) });
             }
         }
 
@@ -278,7 +278,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     #[cfg(test)]
     test_main();
 
-    UART.map(|u| writeln!(u, "EL: {}, CORE: {}, _start_addr: {:#x}", utils::current_el(), utils::current_core(), _start_addr));
+    // UART.map(|u| writeln!(u, "EL: {}, CORE: {}, _start_addr: {:#x}", utils::current_el(), utils::current_core(), _start_addr));
 
     // Initialize kernel objects
     use kobject::{KObjectKind, KObjectMeta, Container, Thread};
@@ -303,7 +303,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         });
 
 
-    UART.map(|u| writeln!(u, "heap_start: {}, heap_size: {}, mem_start: {}, mem_size: {}", hstart, hsize, mem_start, mem_size));
+    // UART.map(|u| writeln!(u, "heap_start: {}, heap_size: {}, mem_start: {}, mem_size: {}", hstart, hsize, mem_start, mem_size));
 
     let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
     let page = page_tree.get().unwrap();
@@ -320,7 +320,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
 
     let root_ct = unsafe { (pa!(root_ct_ref) as *mut Container).as_mut().unwrap() };
-    UART.map(|u| writeln!(u, "root container slots: {:?}", root_ct.slots));
+    // UART.map(|u| writeln!(u, "root container slots: {:?}", root_ct.slots));
 
 
     let th_slot = root_ct.get_slot().unwrap();
@@ -333,15 +333,27 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         th_ref
     };
 
+
     thread::spawn(root_ct, || {
-        UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}, thread\n", utils::current_core());
-        });
+        loop {
+            crate::exception::interrupt_disable();
+            UART.map(|uart| {
+                let _ = write!(uart, "Running from core {}, thread 2\n", utils::current_core());
+            });
+            crate::exception::interrupt_enable();
+        }
     });
 
 
-    schedule::schedule();
+    timer::init_timer(unsafe { gic::GIC::new(30) });
 
+    // loop {
+        // crate::exception::interrupt_disable();
+        // UART.map(|uart| {
+            // let _ = write!(uart, "Running from core {}, thread 1\n", utils::current_core());
+        // });
+        // crate::exception::interrupt_enable();
+    // }
 
 
     // if APP_ENABLE {
@@ -376,8 +388,14 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     // }
 
     loop {
+
+        crate::exception::interrupt_disable();
+        UART.map(|uart| {
+            let _ = write!(uart, "Running from core {}, thread 1\n", utils::current_core());
+        });
+        crate::exception::interrupt_enable();
         unsafe {
-            asm!("wfi");
+            asm!("wfi"); // FIXME wfi?
         }
     }
 }

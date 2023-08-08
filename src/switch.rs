@@ -38,6 +38,10 @@ pub unsafe extern "C" fn switch(_curr: *mut Thread, _next: *mut Thread) {
     asm!("mov {}, sp", out(reg) sp);
     thread.saved.sp = sp;
 
+
+    let th_ptr = next as *const _ as usize;
+    asm!("msr TPIDR_EL2, {}", in(reg) th_ptr as u64);
+
     if next_thread.saved.sp == 0 {
         sp = &*(next_thread.stack) as *const _ as usize + 256 * 8;
         let next_thread_addr = next_thread as *const _ as usize;

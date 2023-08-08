@@ -1,8 +1,10 @@
-use crate::{timer, gic};
-// use crate::thread::cpu_off_graceful;
-
 use core::arch::asm;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::fmt::Write;
+
+use crate::{timer, gic, thread};
+
+static YIELD_BEFORE_RETURN: AtomicBool = AtomicBool::new(false);
 
 #[allow(unused)]
 #[derive(Debug)]
@@ -77,6 +79,11 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
                         }
                     }
                 }
+
+                if YIELD_BEFORE_RETURN.load(Ordering::SeqCst) {
+                    YIELD_BEFORE_RETURN.store(false, Ordering::SeqCst);
+                    thread::yield_to_next();
+                }
             }
             _ => {
                 unimplemented!("kind {:?}", info)
@@ -88,7 +95,13 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
 
 fn timer_interrupt_handler(_irq: u32, _frame: &Frame) {
     // crate::UART.map(|u| { use core::fmt::Write; write!(u, ".") });
-    timer::tick();
+    let tick = timer::tick();
+    if tick % 4 == 0 {
+        let _ =
+            YIELD_BEFORE_RETURN
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .expect("should be set to false in previous exception");
+    }
 }
 
 fn cpu_power_down_handler(irq: u32, _: &Frame) {
@@ -102,18 +115,6 @@ pub fn load_table() {
              "msr VBAR_EL2, x0");
     }
     interrupt_enable();
-}
-
-pub fn interrupt_enable() {
-    unsafe {
-        asm!("msr DAIFClr, 7");
-    }
-}
-
-pub fn interrupt_disable() {
-    unsafe {
-        asm!("msr DAIFSet, 7");
-    }
 }
 
 pub struct InterruptDisabled;
@@ -133,4 +134,16 @@ unsafe fn dump_memory(ptr: *const u8, size: usize) {
             let _ = u.write_fmt(format_args!("{:p}: {:x}\n", ptr, core::ptr::read(ptr)));
         });
     })
+}
+
+pub fn interrupt_enable() {
+    unsafe {
+        asm!("msr DAIFClr, 7");
+    }
+}
+
+pub fn interrupt_disable() {
+    unsafe {
+        asm!("msr DAIFSet, 7");
+    }
 }

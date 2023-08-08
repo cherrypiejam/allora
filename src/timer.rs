@@ -9,7 +9,7 @@ use crate::exception::InterruptIndex;
 pub const EL1_PHYSICAL_TIMER: u32 = 30;
 const SYS_FREQ: u32 = 62_500_000; // 62.5 MHz
 
-const TIMER_FREQ: u32 = 100;
+const TIMER_FREQ: u32 = 10;
 const TIMER_TVAL: u32 = SYS_FREQ / TIMER_FREQ;
 
 static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -47,22 +47,10 @@ pub fn spin_wait(duration: time::Duration) {
     {}
 }
 
-pub fn tick() {
-    let count = TICK_COUNT.fetch_add(1, Ordering::SeqCst);
-    // if count % 4 == 0 {
-        // WAIT_LIST.map(|t| {
-            // while let Some(task) = t.pop() {
-                // if task.alive_until <= count {
-                    // let irq = InterruptIndex::CPUPowerDown as u32;
-                    // gic::signal_soft(irq, task.cpu as u32);
-                // } else {
-                    // t.push(task);
-                    // break;
-                // }
-            // }
-        // });
-    // }
-    reset_timer()
+pub fn tick() -> u64 {
+    let count = TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+    reset_timer();
+    count
 }
 
 fn reset_timer() {
