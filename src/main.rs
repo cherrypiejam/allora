@@ -29,6 +29,7 @@ mod label;
 mod kobject;
 mod schedule;
 mod switch;
+mod lfchannel;
 
 use virtio::VirtIORegs;
 
