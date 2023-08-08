@@ -22,14 +22,12 @@ macro_rules! context_restore {
     };
 }
 
-type ThreadBox = Thread<Box<dyn FnMut(), crate::mm::koarena::KObjectArena>>;
-
 #[no_mangle]
-pub unsafe extern "C" fn switch(curr: *mut ThreadBox, next: *mut ThreadBox) {
+pub unsafe extern "C" fn switch(_curr: *mut Thread, _next: *mut Thread) {
     context_stack!();
 
-    let curr: *mut ThreadBox;
-    let next: *mut ThreadBox;
+    let curr: *mut Thread;
+    let next: *mut Thread;
     asm!("mov {}, x0", out(reg) curr);
     asm!("mov {}, x1", out(reg) next);
 
@@ -40,8 +38,23 @@ pub unsafe extern "C" fn switch(curr: *mut ThreadBox, next: *mut ThreadBox) {
     asm!("mov {}, sp", out(reg) sp);
     thread.saved.sp = sp;
 
-    sp = next_thread.saved.sp;
-    asm!("mov sp, {}", in(reg) sp);
+    if next_thread.saved.sp == 0 {
+        sp = &*(next_thread.stack) as *const _ as usize + 256 * 8;
+        let next_thread_addr = next_thread as *const _ as usize;
+        let entry = *(next_thread as *const _ as *const usize);
 
-    context_restore!();
+        asm!("mov x0, {}",
+             "mov x6, {}",
+             "mov sp, {}",
+             "br x6",
+             in(reg) next_thread_addr,
+             in(reg) entry,
+             in(reg) sp);
+
+    } else {
+        sp = next_thread.saved.sp;
+        asm!("mov sp, {}", in(reg) sp);
+        context_restore!();
+    }
+
 }

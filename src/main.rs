@@ -121,8 +121,10 @@ static MEM_POOL: mutex::Mutex<Option<mm::page::PageMap>> = mutex::Mutex::new(Non
 // Label-specific memory allocator
 static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<mm::page::LabeledPageSet>>> = mutex::Mutex::new(None);
 
-// FIXME: must be wait-free
+// LEAK: must be wait-free
 static KOBJECTS: mutex::Mutex<Option<(Vec<kobject::KObjectMeta>, usize)>> = mutex::Mutex::new(None);
+
+static READY_LIST: mutex::Mutex<Option<Vec<kobject::KObjectRef>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 const APP_ENABLE: bool = false;
@@ -271,18 +273,18 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         }
     }
 
-
-    // WAIT_LIST.lock().replace(Vec::new());
+    READY_LIST.lock().replace(Vec::new());
 
     #[cfg(test)]
     test_main();
 
+    UART.map(|u| writeln!(u, "EL: {}, CORE: {}, _start_addr: {:#x}", utils::current_el(), utils::current_core(), _start_addr));
+
     // Initialize kernel objects
-    use kobject::{KObjectKind, KObjectMeta, Container};
+    use kobject::{KObjectKind, KObjectMeta, Container, Thread};
     use mm::koarena::KObjectArena;
     use mm::page_tree::PageTree;
     use mm::{page_align_up, page_align_down, pa};
-    use core::mem::size_of;
 
     KOBJECTS.lock().replace((
         Vec::with_capacity(page_align_down(mem_size) / PAGE_SIZE),
@@ -306,34 +308,40 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
     let page = page_tree.get().unwrap();
 
+    use kobject::IsKObjectRef;
 
-    KOBJECTS.map(|(ks, ofs)| {
-        let rootc = &mut ks[page - *ofs];
-        // rootc.label = None;
-        rootc.kind = KObjectKind::Container;
-        rootc.free_pages = page_tree;
-        unsafe {
-            rootc.alloc.as_mut().lock().append(
-                pa!(page) + size_of::<Container>(),
-                PAGE_SIZE - size_of::<Container>(),
-            );
-            (pa!(page) as *mut Container)
-                .write(Container { slots: Vec::new_in(rootc.alloc.clone()) });
-        }
-    });
+    let root_ct_ref = unsafe {
+        let ct_ref = Container::create(page, 0);
+        ct_ref.map_meta(move |ct_meta| {
+            ct_meta.free_pages = page_tree;
+        });
+        ct_ref
+    };
 
 
-    let root_container = unsafe { (pa!(page) as *mut Container).as_mut().unwrap() };
-    UART.map(|u| writeln!(u, "root container slots: {:?}", root_container.slots));
+    let root_ct = unsafe { (pa!(root_ct_ref) as *mut Container).as_mut().unwrap() };
+    UART.map(|u| writeln!(u, "root container slots: {:?}", root_ct.slots));
 
 
-    UART.map(|u| writeln!(u, "EL: {}, CORE: {}, _start_addr: {:#x}", utils::current_el(), utils::current_core(), _start_addr));
+    let th_slot = root_ct.get_slot().unwrap();
+    let th_page = root_ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
+    root_ct.set_slot(th_slot, th_page);
 
-    thread::spawn(root_container, || {
+    let main_th_ref = unsafe {
+        let th_ref = Thread::create(th_page, || {});
+        thread::init_thread(pa!(th_ref) as *mut Thread);
+        th_ref
+    };
+
+    thread::spawn(root_ct, || {
         UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}\n", utils::current_core());
+            let _ = write!(uart, "Running from core {}, thread\n", utils::current_core());
         });
     });
+
+
+    schedule::schedule();
+
 
 
     // if APP_ENABLE {

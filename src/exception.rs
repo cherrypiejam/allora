@@ -78,7 +78,9 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
                     }
                 }
             }
-            _ => unimplemented!("kind {:?}", info)
+            _ => {
+                unimplemented!("kind {:?}", info)
+            }
         }
         _ => unimplemented!("desc {:?}", info)
     }

@@ -14,7 +14,7 @@ use crate::mm::koarena::KObjectArena;
 use crate::mm::{pa, PAGE_SIZE};
 use crate::KOBJECTS;
 
-type KObjectRef = usize;
+pub type KObjectRef = usize;
 const INVALID_KOBJECT_REF: usize = usize::MAX;
 
 // All metadata are stored in a global array, indexed by its page number
@@ -22,7 +22,7 @@ const INVALID_KOBJECT_REF: usize = usize::MAX;
 pub struct KObjectMeta {
     pub id: KObjectRef,
     pub parent: Option<KObjectRef>,
-    pub label: Option<Buckle<KObjectArena>>,
+    pub label: Option<Buckle<KObjectArena>>, // FIXME: reference or object?
     pub alloc: KObjectArena, // if oom, get one page from its page tree
     pub kind: KObjectKind,
     pub free_pages: PageTree,
@@ -36,13 +36,9 @@ pub enum KObjectKind {
     Page(KObjectRef),
 }
 
-// pub enum KObjectType {
-    // Container(KObjectRef),
-// }
-
 // Safety: ?
-trait IsKObjectRef {
-    fn map_meta<U, F: FnMut(&mut KObjectMeta) -> U>(&self, f: F) -> Option<U>;
+pub trait IsKObjectRef {
+    fn map_meta<U, F: FnOnce(&mut KObjectMeta) -> U>(&self, f: F) -> Option<U>;
     // fn meta(&self) -> &'a KObjectMeta;
     // fn meta_mut(&self) -> &'a mut KObjectMeta;
     // fn container(&self) -> &'a Container;
@@ -51,7 +47,7 @@ trait IsKObjectRef {
 
 impl<'a> IsKObjectRef for KObjectRef {
 
-    fn map_meta<U, F: FnMut(&mut KObjectMeta) -> U>(&self, mut f: F) -> Option<U> {
+    fn map_meta<U, F: FnOnce(&mut KObjectMeta) -> U>(&self, f: F) -> Option<U> {
         KOBJECTS
             .map(|(ks, ofs)| {
                 let id = *self - *ofs;
@@ -110,12 +106,21 @@ unsafe fn kobject_create(kind: KObjectKind, page: usize) -> KObjectRef {
         let ct_id = page - *ofs;
         let ct_meta = &mut ks[ct_id];
 
+        // ct_meta.label =
+
         match kind {
             KObjectKind::Container => {
                 ct_meta.kind = KObjectKind::Container;
                 ct_meta.alloc.as_mut().lock().append(
                     pa!(page) + size_of::<Container>(),
                     PAGE_SIZE - size_of::<Container>(),
+                );
+            }
+            KObjectKind::Thread => {
+                ct_meta.kind = KObjectKind::Thread;
+                ct_meta.alloc.as_mut().lock().append(
+                    pa!(page) + size_of::<Thread>(),
+                    PAGE_SIZE - size_of::<Thread>(),
                 );
             }
             _ => unimplemented!(),

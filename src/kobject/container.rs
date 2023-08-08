@@ -20,8 +20,8 @@ impl Drop for Container {
 }
 
 impl Container {
-    pub unsafe fn create(pg: usize) -> KObjectRef {
-        let ct_ref = kobject_create(KObjectKind::Container, pg);
+    pub unsafe fn create(page: usize, label_ref: KObjectRef) -> KObjectRef {
+        let ct_ref = kobject_create(KObjectKind::Container, page);
         let ct_ptr = pa!(ct_ref) as *mut Container;
 
         ct_ptr.write(Container {
