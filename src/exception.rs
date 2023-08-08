@@ -96,7 +96,7 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
 fn timer_interrupt_handler(_irq: u32, _frame: &Frame) {
     // crate::UART.map(|u| { use core::fmt::Write; write!(u, ".") });
     let tick = timer::tick();
-    if tick % 4 == 0 {
+    if tick % thread::TIME_SLICE == 0 {
         let _ =
             YIELD_BEFORE_RETURN
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)

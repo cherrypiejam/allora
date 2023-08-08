@@ -7,7 +7,7 @@ use crate::schedule::schedule;
 use crate::{KOBJECTS, PAGE_SIZE};
 use crate::mm::{pa, koarena::KObjectArena};
 
-use crate::switch::switch;
+pub const TIME_SLICE: u64 = 4;
 
 extern "C" {
     fn cpu_on(core: usize, main: *mut core::ffi::c_void) -> isize;
