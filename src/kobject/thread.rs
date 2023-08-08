@@ -12,7 +12,7 @@ pub struct SavedFrame {
     pub sp: usize,
 }
 
-const STACK_SIZE: usize = 2048;
+pub const STACK_SIZE: usize = 2048;
 const STACK_LEN: usize = STACK_SIZE / size_of::<usize>();
 
 #[repr(C)]

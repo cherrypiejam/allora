@@ -9,10 +9,10 @@ use crate::mm::{pa, koarena::KObjectArena};
 
 pub const TIME_SLICE: u64 = 4;
 
-extern "C" {
-    fn cpu_on(core: usize, main: *mut core::ffi::c_void) -> isize;
-    fn cpu_off();
-}
+// extern "C" {
+    // fn cpu_on(core: usize, main: *mut core::ffi::c_void) -> isize;
+    // fn cpu_off();
+// }
 
 extern "C" fn thread_start(mut conf: Box<Thread, KObjectArena>) {
     (conf.userdata)()
@@ -77,8 +77,6 @@ pub fn spawn<F: FnMut() + 'static>(ct: &mut Container, mut f: F) {
 }
 
 pub fn yield_to_next() {
-    // use core::fmt::Write;
-    // crate::UART.map(|u| writeln!(u, "yield"));
     schedule();
 }
 
@@ -87,14 +85,16 @@ pub unsafe fn init_thread(th_ptr: *const Thread) {
     asm!("msr TPIDR_EL2, {}", in(reg) th_ptr as u64);
 }
 
-pub fn current_thread<'a>() -> &'a mut Thread {
+pub fn current_thread<'a>() -> Option<&'a mut Thread> {
     let th_ptr: u64;
     unsafe {
         asm!("mrs {}, TPIDR_EL2", out(reg) th_ptr);
     }
     if th_ptr == 0 {
-        panic!("currently not a thread")
+        None
     } else {
-        unsafe { &mut *(th_ptr as *mut _) }
+        Some(unsafe {
+            &mut *(th_ptr as *mut _)
+        })
     }
 }

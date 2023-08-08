@@ -1,7 +1,6 @@
 use core::arch::asm;
-use alloc::boxed::Box;
 
-use crate::kobject::Thread;
+use crate::kobject::{Thread, STACK_SIZE};
 
 extern "C" {
     fn context_stack();
@@ -28,8 +27,10 @@ pub unsafe extern "C" fn switch(_curr: *mut Thread, _next: *mut Thread) {
 
     let curr: *mut Thread;
     let next: *mut Thread;
-    asm!("mov {}, x0", out(reg) curr);
-    asm!("mov {}, x1", out(reg) next);
+    asm!("mov {}, x0",
+         "mov {}, x1",
+         out(reg) curr,
+         out(reg) next);
 
     let thread = &mut *curr;
     let next_thread = &mut *next;
@@ -38,27 +39,29 @@ pub unsafe extern "C" fn switch(_curr: *mut Thread, _next: *mut Thread) {
     asm!("mov {}, sp", out(reg) sp);
     thread.saved.sp = sp;
 
-
-    let th_ptr = next as *const _ as usize;
-    asm!("msr TPIDR_EL2, {}", in(reg) th_ptr as u64);
+    asm!("msr TPIDR_EL2, {}", in(reg) next);
 
     if next_thread.saved.sp == 0 {
-        sp = &*(next_thread.stack) as *const _ as usize + 256 * 8;
-        let next_thread_addr = next_thread as *const _ as usize;
+        sp = &*(next_thread.stack) as *const _ as usize + STACK_SIZE;
         let entry = *(next_thread as *const _ as *const usize);
 
-        asm!("mov x0, {}",
-             "mov x6, {}",
-             "mov sp, {}",
+        asm!("msr TPIDR_EL2, {0}",
+             "mov x0, {0}",
+             "mov x6, {1}",
+             "mov sp, {2}",
              "br x6",
-             in(reg) next_thread_addr,
+             in(reg) next,
              in(reg) entry,
              in(reg) sp);
 
     } else {
         sp = next_thread.saved.sp;
-        asm!("mov sp, {}", in(reg) sp);
-        context_restore!();
-    }
 
+        asm!("msr TPIDR_EL2, {}",
+             "mov sp, {}",
+             in(reg) next,
+             in(reg) sp);
+        context_restore!();
+
+    }
 }

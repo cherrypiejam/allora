@@ -3,7 +3,6 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use core::time;
 
 use crate::gic::{GIC, self};
-// use crate::WAIT_LIST;
 use crate::exception::InterruptIndex;
 
 pub const EL1_PHYSICAL_TIMER: u32 = 30;

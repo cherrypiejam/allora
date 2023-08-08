@@ -80,8 +80,10 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
                     }
                 }
 
-                if YIELD_BEFORE_RETURN.load(Ordering::SeqCst) {
-                    YIELD_BEFORE_RETURN.store(false, Ordering::SeqCst);
+                if YIELD_BEFORE_RETURN
+                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::Relaxed)
+                    == Ok(true)
+                {
                     thread::yield_to_next();
                 }
             }
@@ -99,8 +101,8 @@ fn timer_interrupt_handler(_irq: u32, _frame: &Frame) {
     if tick % thread::TIME_SLICE == 0 {
         let _ =
             YIELD_BEFORE_RETURN
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .expect("should be set to false in previous exception");
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+            .expect("assumption failed");
     }
 }
 
@@ -117,14 +119,11 @@ pub fn load_table() {
     interrupt_enable();
 }
 
-pub struct InterruptDisabled;
 
-impl InterruptDisabled {
-    pub fn with<F: Fn()>(f: F) {
-        interrupt_disable();
-        f();
-        interrupt_enable();
-    }
+pub fn with_intr_disabled<F: Fn()>(f: F) {
+    interrupt_disable();
+    f();
+    interrupt_enable();
 }
 
 #[allow(dead_code)]

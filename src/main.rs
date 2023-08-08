@@ -224,7 +224,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
                     irqs.into_iter().find(|&irq| irq == timer::EL1_PHYSICAL_TIMER)
                 })
                 .flatten() {
-                // timer::init_timer(unsafe { gic::GIC::new(irq) });
+                timer::init_timer(unsafe { gic::GIC::new(irq) });
             }
         }
 
@@ -344,59 +344,16 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         }
     });
 
+    cpu_idle();
 
-    timer::init_timer(unsafe { gic::GIC::new(30) });
+}
 
-    // loop {
-        // crate::exception::interrupt_disable();
-        // UART.map(|uart| {
-            // let _ = write!(uart, "Running from core {}, thread 1\n", utils::current_core());
-        // });
-        // crate::exception::interrupt_enable();
-    // }
-
-
-    // if APP_ENABLE {
-        // thread::spawn(|| {
-            // UART.map(|uart| {
-                // let _ = write!(uart, "Running from core {}\n", utils::current_core());
-            // });
-            // let mut shell = apps::shell::Shell {
-                // blk: &BLK,
-                // entropy: &ENTROPY,
-            // };
-            // apps::shell::main(&UART, &mut shell);
-        // });
-
-        // UART.lock()
-            // .as_mut()
-            // .map(|uart| uart.write_bytes(b"Booting Allora...\n"));
-
-        // thread::spawn(|| {
-            // UART.map(|uart| {
-                // let _ = write!(uart, "Running from core {}\n", utils::current_core());
-            // });
-            // NET.map(|mut net| {
-                // let mut shell = apps::shell::Shell {
-                    // blk: &BLK,
-                    // entropy: &ENTROPY,
-                // };
-                // apps::net::Net { net: &mut net }.run(&mut shell)
-            // });
-        // });
-
-    // }
-
+pub fn cpu_idle() -> ! {
     loop {
-
-        crate::exception::interrupt_disable();
-        UART.map(|uart| {
-            let _ = write!(uart, "Running from core {}, thread 1\n", utils::current_core());
+        exception::with_intr_disabled(|| unsafe {
+            // ensure CPU waking up first
+            asm!("wfi");
         });
-        crate::exception::interrupt_enable();
-        unsafe {
-            asm!("wfi"); // FIXME wfi?
-        }
     }
 }
 
@@ -414,8 +371,7 @@ fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Testable]) {
-    use exception::InterruptDisabled;
-    InterruptDisabled::with(|| {
+    exception::with_intr_disabled(|| {
         // It is single threaded anyway, let's disable interrupts.
         let mut uart = unsafe { uart::UART::new(0x0900_0000 as _, gic::GIC::new(uart::IRQ)) };
         for test in tests {
