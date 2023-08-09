@@ -1,10 +1,12 @@
-use super::list;
-
 use core::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use core::cell::Cell;
+use core::alloc::Allocator;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use alloc::alloc::Global;
+
+use super::list::List;
 
 
 #[derive(Clone)]
@@ -13,16 +15,16 @@ struct Entry<T: Clone> {
     version: u64,
 }
 
-struct Channel<T: Clone> {
-    chan: list::List<Entry<T>>,
+struct Channel<T: Clone, A: Allocator + Clone = Global> {
+    chan: List<Entry<T>, A>,
     version: AtomicU64,
     destroy: AtomicBool,
 }
 
-impl<T: Clone> Channel<T> {
-    fn new() -> Self {
+impl<T: Clone, A: Allocator + Clone> Channel<T, A> {
+    fn new_in(alloc: A) -> Self {
         Channel {
-            chan: list::List::<Entry<T>>::new(),
+            chan: List::new_in(alloc),
             version: AtomicU64::new(0),
             destroy: AtomicBool::new(false),
         }
@@ -30,17 +32,27 @@ impl<T: Clone> Channel<T> {
 }
 
 pub fn channel<T: Clone>() -> (Sender<T>, Receiver<T>) {
-    let channel = Box::into_raw(Box::new(Channel::new()));
+    channel_in(Global)
+}
+
+
+pub fn channel_in<T: Clone, A: Allocator + Clone>(alloc: A) -> (Sender<T, A>, Receiver<T, A>) {
+    let channel = Box::into_raw(Box::new_in(Channel::new_in(alloc.clone()), alloc));
     let s = Sender { channel };
     let r = Receiver { channel };
     (s, r)
 }
 
-pub struct Sender<T: Clone> {
-    channel: *mut Channel<T>,
+
+//////////////
+// Sender
+//////////////
+
+pub struct Sender<T: Clone, A: Allocator + Clone = Global> {
+    channel: *mut Channel<T, A>,
 }
 
-impl<T: Clone> Sender<T> {
+impl<T: Clone, A: Allocator + Clone> Sender<T, A> {
     pub fn send(&self, msg: T) {
         let channel = unsafe { &*self.channel };
         let version = channel.version.fetch_add(1, Ordering::Relaxed) + 1;
@@ -49,25 +61,34 @@ impl<T: Clone> Sender<T> {
     }
 }
 
-unsafe impl<T: Send + Clone> Send for Sender<T> {}
+unsafe impl<T: Send + Clone, A: Send + Allocator + Clone> Send for Sender<T, A> {}
 
-pub struct Receiver<T: Clone> {
-    channel: *const Channel<T>,
+
+//////////////
+// Inner Receiver
+//////////////
+
+pub struct Receiver<T: Clone, A: Allocator + Clone = Global> {
+    channel: *const Channel<T, A>,
 }
 
-unsafe impl<T: Send + Clone> Send for Receiver<T> {}
+unsafe impl<T: Send + Clone, A: Send + Allocator + Clone> Send for Receiver<T, A> {}
 
-pub struct WrapperReceiver<T: Clone> {
-    receiver: Receiver<T>,
+pub struct WrapperReceiver<T: Clone, A: Allocator + Clone> {
+    receiver: Receiver<T, A>,
     last_seen: Cell<u64>,
 }
 
-impl<T: Clone> WrapperReceiver<T> {
-    pub fn new(receiver: Receiver<T>) -> Self {
+impl<T: Clone, A: Allocator + Clone> WrapperReceiver<T, A> {
+    pub fn new(receiver: Receiver<T, A>) -> Self {
         Self { receiver, last_seen: Cell::new(0) }
     }
 
     pub fn recv(&self) -> Option<Vec<T>> {
+        self.recv_in(Global)
+    }
+
+    pub fn recv_in<B: Allocator + Clone>(&self, alloc: B) -> Option<Vec<T, B>> {
         let channel = unsafe { &*self.receiver.channel };
         let destroyed = channel.destroy.load(Ordering::Relaxed);
         if destroyed {
@@ -77,97 +98,46 @@ impl<T: Clone> WrapperReceiver<T> {
             if channel.chan.first().version <= last_seen {
                 None
             } else {
-                let vec = channel.chan.to_vec();
-                self.last_seen.set(vec.first().unwrap().version);
-                Some(
-                    vec
+                let history = channel.chan.to_vec_in(alloc.clone());
+                self.last_seen.set(history.first().unwrap().version);
+                let mut vec = Vec::new_in(alloc);
+                history
                     .into_iter()
                     .filter(|x| x.version > last_seen)
                     .map(|x| x.msg)
-                    .collect::<Vec<T>>()
-                )
+                    .for_each(|msg| {
+                        vec.push(msg);
+                    });
+                Some(vec)
             }
         }
     }
 }
 
-unsafe impl<T: Send + Clone> Send for WrapperReceiver<T> {}
+unsafe impl<T: Send + Clone, A: Send + Allocator + Clone> Send for WrapperReceiver<T, A> {}
 // impl<T> !Sync for WrapperReceiver<T> {}
 
 
-// #[cfg(test)]
-// mod tests {
-    // use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
 
-    // #[test]
-    // fn channel_single_thread() {
-        // let (tx, rx) = channel::<i32>();
-        // let rx = WrapperReceiver::new(rx);
+    #[test_case]
+    fn test_channel() {
+        let (tx, rx) = channel::<i32>();
+        let rx = WrapperReceiver::new(rx);
 
-        // tx.send(1337);
-        // tx.send(1338);
-        // tx.send(1339);
-        // assert_eq!(Some(vec![1339, 1338, 1337]), rx.recv());
+        tx.send(1337);
+        tx.send(1338);
+        tx.send(1339);
+        assert_eq!(Some(vec![1339, 1338, 1337]), rx.recv());
 
-        // tx.send(1340);
-        // tx.send(1341);
-        // assert_eq!(Some(vec![1341, 1340]), rx.recv());
-        // assert_eq!(None, rx.recv());
-    // }
+        tx.send(1340);
+        tx.send(1341);
+        assert_eq!(Some(vec![1341, 1340]), rx.recv());
+        assert_eq!(None, rx.recv());
+        assert_eq!(None, rx.recv());
+    }
 
-    // #[test]
-    // fn channel_two_threads() {
-        // use std::sync::{Arc, Mutex, Condvar};
-
-        // let (tx, rx) = channel::<i32>();
-
-        // tx.send(1337);
-        // tx.send(1338);
-        // tx.send(1339);
-
-        // let pair = Arc::new((Mutex::new(false), Condvar::new()));
-        // let pair2 = pair.clone();
-
-        // let handle = std::thread::spawn(move || {
-            // let (lock, cvar) = &*pair2;
-            // let rx = WrapperReceiver::new(rx); // In LARPS, the wrapper uses THIS thread's local
-                                               // // memory. This is why it is initualized here.
-            // assert_eq!(Some(vec![1339, 1338, 1337]), rx.recv());
-
-            // // Done the first round
-            // {
-                // let mut state = lock.lock().unwrap();
-                // *state = true;
-                // cvar.notify_one();
-            // }
-
-            // // Wait for the second round
-            // {
-                // let mut state = lock.lock().unwrap();
-                // while *state {
-                    // state = cvar.wait(state).unwrap();
-                // }
-            // }
-            // assert_eq!(Some(vec![1341, 1340]), rx.recv());
-            // assert_eq!(None, rx.recv());
-        // });
-
-        // let (lock, cvar) = &*pair;
-        // {
-            // let mut state = lock.lock().unwrap();
-            // while !*state {
-                // state = cvar.wait(state).unwrap();
-            // }
-        // }
-
-        // tx.send(1340);
-        // tx.send(1341);
-        // {
-            // let mut state = lock.lock().unwrap();
-            // *state = false;
-            // cvar.notify_one();
-        // }
-        // let _ = handle.join();
-    // }
-
-// }
+}

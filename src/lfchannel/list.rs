@@ -72,9 +72,16 @@ impl<T, A: Allocator + Clone> List<T, A> {
     }
 }
 
+
 impl<T: Clone> List<T> {
     pub fn to_vec(&self) -> Vec<T> {
-        let mut vec = Vec::new();
+        self.to_vec_in(Global)
+    }
+}
+
+impl<T: Clone, A: Allocator + Clone> List<T, A> {
+    pub fn to_vec_in<B: Allocator>(&self, alloc: B) -> Vec<T, B> {
+        let mut vec = Vec::new_in(alloc);
         let mut cur = self.head.load(Ordering::Acquire);
         loop {
             cur = unsafe { (*cur).next.load(Ordering::Relaxed) };
@@ -90,16 +97,16 @@ impl<T: Clone> List<T> {
 }
 
 
-// #[cfg(test)]
-// mod tests {
-    // use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // #[test]
-    // fn it_works() {
-        // let list = List::<i32>::new();
-        // list.push(10);
-        // assert!(*list.first() == 10);
-        // list.push(20);
-        // assert!(*list.first() == 20);
-    // }
-// }
+    #[test_case]
+    fn test_list() {
+        let list = List::<i32>::new();
+        list.push(10);
+        assert!(*list.first() == 10);
+        list.push(20);
+        assert!(*list.first() == 20);
+    }
+}
