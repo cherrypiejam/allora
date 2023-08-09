@@ -1,7 +1,7 @@
-use crate::kobject::Thread;
+use crate::kobject::{Thread, ThreadRef, KObjectRef};
 use crate::switch::switch;
 use crate::thread::current_thread;
-use crate::mm::{pa, koref};
+use crate::mm::pgid;
 use crate::READY_LIST;
 
 pub fn schedule() {
@@ -11,14 +11,16 @@ pub fn schedule() {
         let next_ref = READY_LIST.lock().as_mut().and_then(|l| {
             let nref = l.pop();
             if nref.is_some() {
-                l.push(koref!(curr as *const _ as usize));
+                l.push(ThreadRef(unsafe {
+                    KObjectRef::new(pgid!(curr as *const _ as usize))
+                }));
             }
             nref
         });
 
         if let Some(next_ref) = next_ref {
             unsafe {
-                switch(curr, pa!(next_ref) as *mut Thread)
+                switch(curr, next_ref.0.as_ptr())
             }
         }
 

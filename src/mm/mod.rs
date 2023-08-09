@@ -26,12 +26,12 @@ fn align_up(addr: usize, align: usize) -> usize {
 
 // TODO: rename to koref_to_pa
 macro_rules! pa {
-    ($n:expr) => { (($n) * crate::mm::PAGE_SIZE) }
+    ($page_id:expr) => { (($page_id) * crate::mm::PAGE_SIZE) }
 }
 
-macro_rules! koref {
-    ($a:expr) => { (($a) / crate::mm::PAGE_SIZE) }
+macro_rules! pgid {
+    ($pa:expr) => { (($pa) / crate::mm::PAGE_SIZE) }
 }
 
 pub(crate) use pa;
-pub(crate) use koref;
+pub(crate) use pgid;

@@ -2,9 +2,7 @@ use alloc::boxed::Box;
 use core::mem::size_of;
 
 use super::{KObjectRef, KObjectArena, KObjectKind};
-use super::{kobject_create, IsKObjectRef};
-
-use crate::mm::pa;
+use super::kobject_create;
 
 #[repr(C)]
 #[derive(Default)]
@@ -25,9 +23,9 @@ pub struct Thread {
 
 
 impl Thread {
-    pub unsafe fn create<F: FnMut() + 'static>(pg: usize, mut f: F) -> KObjectRef {
-        let th_ref = kobject_create(KObjectKind::Thread, pg);
-        let th_ptr = pa!(th_ref) as *mut Thread;
+    pub unsafe fn create<F: FnMut() + 'static>(pg: usize, mut f: F) -> KObjectRef<'static, Thread> {
+        let th_ref = kobject_create!(Thread, pg);
+        let th_ptr = th_ref.as_ptr();
 
         th_ref.map_meta(|th_meta| {
             th_ptr.write(Thread {

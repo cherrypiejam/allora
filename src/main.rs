@@ -43,10 +43,10 @@ global_asm!(
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
-use core::time::Duration;
+// use core::time::Duration;
 
-use mm::arena;
-use mm::page_tree;
+// use mm::arena;
+// use mm::page_tree;
 use mm::PAGE_SIZE;
 
 extern "C" {
@@ -121,7 +121,7 @@ static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<mm::page::LabeledPageSet>>> = mut
 
 // LEAK: must be wait-free
 static KOBJECTS: mutex::Mutex<Option<(Vec<kobject::KObjectMeta>, usize)>> = mutex::Mutex::new(None);
-static READY_LIST: mutex::Mutex<Option<Vec<kobject::KObjectRef>>> = mutex::Mutex::new(None);
+static READY_LIST: mutex::Mutex<Option<Vec<kobject::ThreadRef>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 const APP_ENABLE: bool = false;
@@ -275,28 +275,23 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     #[cfg(test)]
     test_main();
 
+
+
     // UART.map(|u| writeln!(u, "EL: {}, CORE: {}, _start_addr: {:#x}", utils::current_el(), utils::current_core(), _start_addr));
 
     // Initialize kernel objects
-    use kobject::{KObjectKind, KObjectMeta, Container, Thread};
-    use mm::koarena::KObjectArena;
+    use kobject::{KObjectMeta, KObjectRef, Container, Thread};
     use mm::page_tree::PageTree;
-    use mm::{page_align_up, page_align_down, pa};
+    use mm::{page_align_up, page_align_down};
 
+    let npages = page_align_down(mem_size) / PAGE_SIZE;
     KOBJECTS.lock().replace((
-        Vec::with_capacity(page_align_down(mem_size) / PAGE_SIZE),
+        Vec::with_capacity(npages),
         page_align_up(mem_start) / PAGE_SIZE,
     ));
-    (0..(mem_size/PAGE_SIZE))
-        .for_each(|i| {
-            KOBJECTS.map(|(ks, ofs)| ks.push(KObjectMeta {
-                id: *ofs + i,
-                parent: None,
-                label: None,
-                alloc: KObjectArena::empty(),
-                kind: KObjectKind::None,
-                free_pages: PageTree::empty(),
-            }));
+    (0..npages)
+        .for_each(|_| {
+            KOBJECTS.map(|(ks, _)| ks.push(KObjectMeta::empty()));
         });
 
 
@@ -305,43 +300,51 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
     let page = page_tree.get().unwrap();
 
-    use kobject::IsKObjectRef;
-
     let root_ct_ref = unsafe {
-        let ct_ref = Container::create(page, 0);
+        let ct_ref = Container::create(page, KObjectRef::new(0));
         ct_ref.map_meta(move |ct_meta| {
             ct_meta.free_pages = page_tree;
         });
         ct_ref
     };
 
+    let th_slot = root_ct_ref.as_mut().get_slot().unwrap();
+    let th_page_id = root_ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
 
-    let root_ct = unsafe { (pa!(root_ct_ref) as *mut Container).as_mut().unwrap() };
-    // UART.map(|u| writeln!(u, "root container slots: {:?}", root_ct.slots));
-
-
-    let th_slot = root_ct.get_slot().unwrap();
-    let th_page = root_ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
-    root_ct.set_slot(th_slot, th_page);
 
     let main_th_ref = unsafe {
-        let th_ref = Thread::create(th_page, || {});
-        thread::init_thread(pa!(th_ref) as *mut Thread);
+        let th_ref = Thread::create(th_page_id, || {});
+        thread::init_thread(th_ref.as_ptr());
         th_ref
     };
 
+    root_ct_ref.as_mut().set_slot(th_slot, main_th_ref);
 
-    thread::spawn(root_ct, || {
+
+    thread::spawn(root_ct_ref, || {
         loop {
-            crate::exception::interrupt_disable();
-            UART.map(|uart| {
-                let _ = write!(uart, "Running from core {}, thread 2\n", utils::current_core());
+            exception::with_intr_disabled(|| {
+                UART.map(|uart| {
+                    let _ = write!(uart, "Core {}, thread 2\n", utils::current_core());
+                });
             });
-            crate::exception::interrupt_enable();
+
+            exception::with_intr_disabled(|| unsafe { asm!("wfi") });
         }
     });
 
-    cpu_idle();
+    // cpu_idle();
+
+
+    loop {
+        exception::with_intr_disabled(|| {
+            UART.map(|uart| {
+                let _ = write!(uart, "Core {}, thread 1\n", utils::current_core());
+            });
+        });
+
+        exception::with_intr_disabled(|| unsafe { asm!("wfi") });
+    }
 
 }
 
@@ -352,6 +355,14 @@ pub fn cpu_idle() -> ! {
             asm!("wfi");
         });
     }
+}
+
+pub fn debug(msg: &str) {
+    exception::with_intr_disabled(|| {
+        UART.map(|uart| {
+            let _ = write!(uart, "Core{} EL{} DEBUG: {}\n", utils::current_core(), utils::current_el(), msg);
+        });
+    })
 }
 
 #[panic_handler]

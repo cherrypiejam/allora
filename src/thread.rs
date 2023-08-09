@@ -1,24 +1,24 @@
 use core::arch::asm;
 
-use crate::kobject::{KObjectKind, Container, Thread, IsKObjectRef};
+use crate::kobject::{Container, Thread, ThreadRef};
 use crate::schedule::schedule;
-use crate::PAGE_SIZE;
 use crate::exception::with_intr_disabled;
+use crate::kobject::KObjectRef;
 
 pub const TIME_SLICE: u64 = 4;
 
 
-pub fn spawn<F: FnMut() + 'static>(ct: &mut Container, mut f: F) {
+pub fn spawn<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, mut f: F) {
+    let th_slot = ct_ref.as_mut().get_slot().unwrap();
+    let th_page_id = ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
 
-    let ct_ref = ct as *const _ as usize / PAGE_SIZE;
+    let th_ref = unsafe {
+        Thread::create(th_page_id, move || { f(); loop {} })
+    };
 
-    let th_slot = ct.get_slot().unwrap();
-    let th_page = ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
-    ct.set_slot(th_slot, th_page);
+    ct_ref.as_mut().set_slot(th_slot, th_ref);
 
-    let th_ref = unsafe { Thread::create(th_page, move || { f(); loop {} }) };
-
-    crate::READY_LIST.map(|l| l.push(th_ref));
+    crate::READY_LIST.map(|l| l.push(ThreadRef(th_ref)));
 }
 
 

@@ -1,14 +1,16 @@
 use alloc::vec::Vec;
+use alloc::boxed::Box;
 use core::mem::size_of;
 
-use super::{KObjectRef, KObjectArena, KObjectKind};
-use super::{kobject_create, IsKObjectRef, INVALID_KOBJECT_REF};
+use super::{KObjectRef, KObjectArena, KObjectKind, KObjectPtr};
+use super::{kobject_create, INVALID_KOBJECT_ID};
+use super::Label;
 
 use crate::mm::{pa, PAGE_SIZE};
 use crate::KOBJECTS;
 
 pub struct Container {
-    pub slots: Vec<KObjectRef, KObjectArena>,
+    pub slots: Vec<KObjectPtr, KObjectArena>,
 }
 
 impl Drop for Container {
@@ -20,36 +22,37 @@ impl Drop for Container {
 }
 
 impl Container {
-    pub unsafe fn create(page: usize, label_ref: KObjectRef) -> KObjectRef {
-        let ct_ref = kobject_create(KObjectKind::Container, page);
-        let ct_ptr = pa!(ct_ref) as *mut Container;
-
-        ct_ptr.write(Container {
-            slots: Vec::new_in(ct_ref.map_meta(|m| m.alloc.clone()).unwrap())
-        });
+    pub unsafe fn create(page: usize, _label_ref: KObjectRef<Label>) -> KObjectRef<Container> {
+        let ct_ref = kobject_create!(Container, page);
+        ct_ref
+            .as_ptr()
+            .write(Container {
+                slots: Vec::new_in(ct_ref.map_meta(|m| m.alloc.clone()).unwrap())
+            });
 
         ct_ref
     }
 
     pub fn get_slot(&mut self) -> Option<usize> {
-        if let Some(pos) = self.find_slot(INVALID_KOBJECT_REF) {
+        let invalid_koptr = unsafe { KObjectPtr::new(INVALID_KOBJECT_ID) };
+        if let Some(pos) = self.find_slot(invalid_koptr) {
             Some(pos)
         } else {
-            self.slots.push(INVALID_KOBJECT_REF); // NOTE: push may fail
-                                                  // should not always succeed
+            self.slots.push(invalid_koptr); // NOTE: push may fail
+                                            // should not always succeed
             Some(self.slots.len() - 1)
         }
     }
 
-    pub fn find_slot(&self, ko_ref: KObjectRef) -> Option<usize> {
+    pub fn find_slot(&self, ko_ref: KObjectPtr) -> Option<usize> {
         self.slots
             .iter()
-            .position(|&slot| slot == ko_ref)
+            .position(|&slot| slot == ko_ref.into())
 
     }
 
-    pub fn set_slot(&mut self, slot_id: usize, ko_ref: KObjectRef) {
-        self.slots[slot_id] = ko_ref;
+    pub fn set_slot<T>(&mut self, slot_id: usize, ko_ref: KObjectRef<T>) {
+        self.slots[slot_id] = ko_ref.into();
     }
 
     fn free() {}
