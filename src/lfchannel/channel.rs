@@ -74,6 +74,10 @@ pub struct Receiver<T: Clone, A: Allocator + Clone = Global> {
 
 unsafe impl<T: Send + Clone, A: Send + Allocator + Clone> Send for Receiver<T, A> {}
 
+//////////////
+// Receiver: inner receiver could be in a read-only memory to the current receiver; This wraps it in a writable memory
+//////////////
+
 pub struct WrapperReceiver<T: Clone, A: Allocator + Clone> {
     receiver: Receiver<T, A>,
     last_seen: Cell<u64>,
