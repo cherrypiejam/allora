@@ -11,6 +11,7 @@
 extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use alloc::collections::VecDeque;
 
 pub mod device_tree;
 pub mod gic;
@@ -121,7 +122,7 @@ static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<mm::page::LabeledPageSet>>> = mut
 
 // LEAK: must be wait-free
 static KOBJECTS: mutex::Mutex<Option<(Vec<kobject::KObjectMeta>, usize)>> = mutex::Mutex::new(None);
-static READY_LIST: mutex::Mutex<Option<Vec<kobject::ThreadRef>>> = mutex::Mutex::new(None);
+static READY_LIST: mutex::Mutex<Option<VecDeque<kobject::ThreadRef>>> = mutex::Mutex::new(None);
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
 const APP_ENABLE: bool = false;
@@ -171,19 +172,9 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
                         hstart = heap_start;
                         hsize = size;
 
-                        // let pool_start = memory::page_align_up(heap_start + size / 2);
-                        // let pool_end = memory::page_align_down(heap_start + size);
-                        // let pool_size = pool_end - pool_start;
-                        // let heap_size = pool_start - heap_start;
-
                         ALLOCATOR.lock().init(heap_start, size / 2);
-
-                        // MEM_POOL.lock().replace(memory::page::PageMap::new(pool_start, pool_size));
-
                         mem_start = mm::page_align_up(heap_start + size / 2);
                         mem_size = mm::page_align_down(size / 2 / 2); // FIXME: size isn't the
-                                                                          // end of the heap
-
                         break;
                     } else {
                         panic!("{:#x} {:#x}", addr, heap_start);
@@ -270,7 +261,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         }
     }
 
-    READY_LIST.lock().replace(Vec::new());
+    READY_LIST.lock().replace(VecDeque::new());
 
     #[cfg(test)]
     test_main();
@@ -335,7 +326,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // cpu_idle();
 
-
     loop {
         exception::with_intr_disabled(|| {
             UART.map(|uart| {
@@ -355,14 +345,6 @@ pub fn cpu_idle() -> ! {
             asm!("wfi");
         });
     }
-}
-
-pub fn debug(msg: &str) {
-    exception::with_intr_disabled(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "Core{} EL{} DEBUG: {}\n", utils::current_core(), utils::current_el(), msg);
-        });
-    })
 }
 
 #[panic_handler]
@@ -400,3 +382,22 @@ impl<T: Fn()> Testable for T {
         let _ = writeln!(uart, "[ok]");
     }
 }
+
+
+pub fn debug(msg: &str) {
+    exception::with_intr_disabled(|| {
+        UART.map(|uart| {
+            let _ = write!(uart, "Core{} EL{} DEBUG: {}\n", utils::current_core(), utils::current_el(), msg);
+        });
+    })
+}
+
+
+pub fn debug_option<T: core::fmt::Debug>(msg: &str, val: Option<T>) {
+    exception::with_intr_disabled(|| {
+        UART.map(|uart| {
+            let _ = write!(uart, "Core{} EL{} DEBUG: msg: {}, val: {:?}\n", utils::current_core(), utils::current_el(), msg, val);
+        });
+    })
+}
+

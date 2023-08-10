@@ -1,13 +1,8 @@
 use alloc::vec::Vec;
-use alloc::boxed::Box;
-use core::mem::size_of;
 
 use super::{KObjectRef, KObjectArena, KObjectKind, KObjectPtr};
 use super::{kobject_create, INVALID_KOBJECT_ID};
 use super::Label;
-
-use crate::mm::{pa, PAGE_SIZE};
-use crate::KOBJECTS;
 
 pub struct Container {
     pub slots: Vec<KObjectPtr, KObjectArena>,

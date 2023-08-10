@@ -18,7 +18,7 @@ pub fn spawn<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, mut f: F) {
 
     ct_ref.as_mut().set_slot(th_slot, th_ref);
 
-    crate::READY_LIST.map(|l| l.push(ThreadRef(th_ref)));
+    crate::READY_LIST.map(|l| l.push_back(ThreadRef(th_ref)));
 }
 
 
