@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::mem::size_of;
 
-use super::{KObjectRef, KObjectArena, KObjectKind};
+use super::{KObjectRef, KObjectArena};
 use super::kobject_create;
 
 #[repr(C)]

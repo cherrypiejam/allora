@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{KObjectRef, KObjectArena, KObjectKind, KObjectPtr};
+use super::{KObjectRef, KObjectArena, KObjectPtr};
 use super::{kobject_create, INVALID_KOBJECT_ID};
 use super::Label;
 

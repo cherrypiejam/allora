@@ -172,10 +172,9 @@ impl_from_koptr_for_koref!(Thread);
 impl_from_koptr_for_koref!(Label);
 
 
-
 macro_rules! kobject_create {
     ($kind: ident, $page_id: expr) => {
-        crate::kobject::__kobject_create::<$kind>(KObjectKind::$kind, $page_id)
+        crate::kobject::__kobject_create::<$kind>(crate::kobject::KObjectKind::$kind, $page_id)
     };
 }
 
