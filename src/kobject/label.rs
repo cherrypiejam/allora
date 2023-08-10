@@ -1,5 +1,6 @@
 use labeled::buckle2::{Buckle2 as Buckle, Component};
 use labeled::{Label as IsLabel, HasPrivilege};
+
 use super::{KObjectRef, KObjectArena};
 use super::kobject_create;
 

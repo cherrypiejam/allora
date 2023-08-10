@@ -14,7 +14,8 @@ use crate::mm::koarena::KObjectArena;
 use crate::mm::{pa, PAGE_SIZE};
 use crate::KOBJECTS;
 
-const INVALID_KOBJECT_ID: usize = usize::MAX;
+const INVALID_KOBJ_ID: usize = usize::MAX;
+const KOBJ_DESCR_LEN: usize = 32;
 
 pub struct ThreadRef<'a>(pub KObjectRef<'a, Thread>);
 unsafe impl Send for ThreadRef<'_> {}
@@ -36,6 +37,7 @@ pub struct KObjectMeta<'a, 'b> {
     pub alloc: KObjectArena, // if oom, get one page from its page tree
     pub kind: KObjectKind,
     pub free_pages: PageTree,
+    pub descr: [u8; KOBJ_DESCR_LEN],
 }
 
 impl KObjectMeta<'_, '_> {
@@ -47,7 +49,14 @@ impl KObjectMeta<'_, '_> {
             alloc: KObjectArena::empty(),
             kind: KObjectKind::None,
             free_pages: PageTree::empty(),
+            descr: [0u8; KOBJ_DESCR_LEN],
         }
+    }
+
+    fn descr(&self) -> &str {
+        core::str::from_utf8(&self.descr)
+            .unwrap()
+            .trim_end_matches(char::from(0))
     }
 }
 
@@ -77,11 +86,11 @@ impl KObjectPtr {
     }
 
     pub unsafe fn null() -> Self {
-        KObjectPtr::new(INVALID_KOBJECT_ID)
+        KObjectPtr::new(INVALID_KOBJ_ID)
     }
 
     pub fn is_null(&self) -> bool {
-        if self.id == INVALID_KOBJECT_ID {
+        if self.id == INVALID_KOBJ_ID {
             true
         } else {
             false
@@ -174,13 +183,20 @@ impl_from_koptr_for_koref!(Label);
 
 macro_rules! kobject_create {
     ($kind: ident, $page_id: expr) => {
-        crate::kobject::__kobject_create::<$kind>(crate::kobject::KObjectKind::$kind, $page_id)
+        crate::kobject::__kobject_create::<$kind>(crate::kobject::KObjectKind::$kind, $page_id, "")
+    };
+}
+
+macro_rules! kobject_create_with_description {
+    ($kind: ident, $page_id: expr, $descr: expr) => {
+        crate::kobject::__kobject_create::<$kind>(crate::kobject::KObjectKind::$kind, $page_id, $descr)
     };
 }
 
 pub(crate) use kobject_create;
+pub(crate) use kobject_create_with_description;
 
-unsafe fn __kobject_create<'a, T>(kind: KObjectKind, page_id: usize) -> KObjectRef<'a, T>
+unsafe fn __kobject_create<'a, T>(kind: KObjectKind, page_id: usize, descr: &str) -> KObjectRef<'a, T>
 where
     KObjectRef<'a, T>: From<KObjectPtr>
 {
@@ -199,6 +215,17 @@ where
             ),
             kind,
             free_pages: PageTree::empty(),
+            descr: {
+                let mut buf = [0u8; KOBJ_DESCR_LEN];
+                buf.copy_from_slice(&descr.as_bytes()[0..(
+                    if descr.len() > KOBJ_DESCR_LEN {
+                        KOBJ_DESCR_LEN
+                    } else {
+                        descr.len()
+                    })
+                ]);
+                buf
+            }
         };
 
         kobjs[id].koptr.into()
