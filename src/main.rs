@@ -323,20 +323,16 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     };
     rb.time_slices[0] = Some(thread::spawn_thref(
         root_ct_ref,
-        // || cpu_idle(),
-        || cpu_idle_debug("idle2"),
+        || cpu_idle_debug("idling"),
     ));
     rb.time_slices[1] = Some(thread::spawn_thref(
         root_ct_ref,
-        || cpu_idle_debug("idle2"),
-        // || cpu_idle(),
+        || cpu_idle_debug("idling"),
     ));
     RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
 
     // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });
 
-    // cpu_idle_debug("idle");
-    // cpu_idle_debug("idle");
     cpu_idle();
 
 }
@@ -353,7 +349,7 @@ pub fn cpu_idle() -> ! {
 
 pub fn cpu_idle_debug(msg: &str) -> ! {
     loop {
-            debug(msg);
+        debug(msg);
         exception::with_intr_disabled(|| unsafe {
             asm!("wfi");
         });
@@ -406,20 +402,6 @@ pub fn debug(msg: &str) {
         });
     })
 }
-
-
-// pub fn debug(msg: &str) {
-    // exception::with_intr_disabled(|| {
-        // UART.map(|uart| {
-            // let _ = write!(uart, "DEBUG @ Thread {:#x}: {}, {}\n",
-                           // // thread::current_thread().map(|t| mm::pgid!(t as *const kobject::Thread as usize)).unwrap_or(0),
-                           // 0,
-                           // msg,
-                           // 0
-                           // );
-        // });
-    // })
-// }
 
 
 // pub fn debug(msg: &str) {

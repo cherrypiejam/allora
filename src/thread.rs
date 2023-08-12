@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::kobject::{Container, Thread, ThreadRef};
+use crate::kobject::{Container, Thread, ThreadRef, THREAD_NPAGES};
 use crate::schedule::{schedule, schedule_rbs};
 use crate::exception::with_intr_disabled;
 use crate::kobject::KObjectRef;
@@ -25,7 +25,7 @@ pub fn spawn<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, mut f: F) {
 
 pub fn spawn_thref<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, mut f: F) -> ThreadRef{
     let th_slot = ct_ref.as_mut().get_slot().unwrap();
-    let th_page_id = ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
+    let th_page_id = ct_ref.map_meta(|m| m.free_pages.get_multiple(THREAD_NPAGES)).unwrap().unwrap();
 
     let th_ref = unsafe {
         Thread::create(th_page_id, move || { f(); cpu_idle(); })
@@ -38,15 +38,11 @@ pub fn spawn_thref<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, mut f: F
 
 
 pub fn yield_to_next() {
-    // schedule();
-    schedule_rbs()
-}
-
-// pub fn yield_with_insr_disabled() {
-    // with_intr_disabled(|| {
+    with_intr_disabled(|| {
         // schedule();
-    // })
-// }
+        schedule_rbs();
+    })
+}
 
 
 pub unsafe fn init_thread(th_ptr: *const Thread) {

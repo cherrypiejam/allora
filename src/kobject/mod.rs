@@ -7,7 +7,7 @@ mod thread;
 
 pub use container::Container;
 pub use label::Label;
-pub use thread::{Thread, STACK_SIZE};
+pub use thread::{Thread, STACK_SIZE, THREAD_NPAGES};
 
 use crate::mm::page_tree::PageTree;
 use crate::mm::koarena::KObjectArena;
@@ -206,27 +206,51 @@ where
 
         assert!(kobjs[id].kind == KObjectKind::None);
 
-        kobjs[id] = KObjectMeta {
-            koptr: KObjectPtr::new(page_id),
-            parent: None,
-            label: None,
-            alloc: KObjectArena::new(
-                pa!(page_id) + size_of::<T>(),
-                PAGE_SIZE - size_of::<T>()
-            ),
-            kind,
-            free_pages: PageTree::empty(),
-            descr: {
-                let mut buf = [0u8; KOBJ_DESCR_LEN];
-                let len = if descr.len() > KOBJ_DESCR_LEN {
-                    KOBJ_DESCR_LEN
-                } else {
-                    descr.len()
-                };
-                buf[..len].copy_from_slice(&descr.as_bytes()[..len]);
-                buf
-            }
-        };
+        if let KObjectKind::Thread = kind {
+            kobjs[id] = KObjectMeta {
+                koptr: KObjectPtr::new(page_id),
+                parent: None,
+                label: None,
+                alloc: KObjectArena::new(
+                    pa!(page_id) + size_of::<T>(),
+                    THREAD_NPAGES * PAGE_SIZE - size_of::<T>()
+                ),
+                kind,
+                free_pages: PageTree::empty(),
+                descr: {
+                    let mut buf = [0u8; KOBJ_DESCR_LEN];
+                    let len = if descr.len() > KOBJ_DESCR_LEN {
+                        KOBJ_DESCR_LEN
+                    } else {
+                        descr.len()
+                    };
+                    buf[..len].copy_from_slice(&descr.as_bytes()[..len]);
+                    buf
+                }
+            };
+        } else {
+            kobjs[id] = KObjectMeta {
+                koptr: KObjectPtr::new(page_id),
+                parent: None,
+                label: None,
+                alloc: KObjectArena::new(
+                    pa!(page_id) + size_of::<T>(),
+                    PAGE_SIZE - size_of::<T>()
+                ),
+                kind,
+                free_pages: PageTree::empty(),
+                descr: {
+                    let mut buf = [0u8; KOBJ_DESCR_LEN];
+                    let len = if descr.len() > KOBJ_DESCR_LEN {
+                        KOBJ_DESCR_LEN
+                    } else {
+                        descr.len()
+                    };
+                    buf[..len].copy_from_slice(&descr.as_bytes()[..len]);
+                    buf
+                }
+            };
+        }
 
         kobjs[id].koptr.into()
     })
