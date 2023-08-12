@@ -49,6 +49,7 @@ pub unsafe extern "C" fn switch(_curr: *mut Thread, _next: *mut Thread) {
              "mov x0, {0}",
              "mov x6, {1}",
              "mov sp, {2}",
+             "msr DAIFClr, 7", // Enable interrupts
              "br x6",
              in(reg) next,
              in(reg) entry,

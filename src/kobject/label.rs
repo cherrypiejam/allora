@@ -9,7 +9,7 @@ pub struct Label {
 }
 
 impl Label {
-    pub unsafe fn create(pg: usize, input: &str) -> KObjectRef<'static, Label> {
+    pub unsafe fn create(pg: usize, input: &str) -> KObjectRef<Label> {
         let lb_ref = kobject_create!(Label, pg);
 
         lb_ref.map_meta(|lb_meta| {

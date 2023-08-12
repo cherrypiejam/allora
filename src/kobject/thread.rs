@@ -11,6 +11,7 @@ pub struct SavedFrame {
 }
 
 pub const STACK_SIZE: usize = 2048;
+// pub const STACK_SIZE: usize = 3500;
 const STACK_LEN: usize = STACK_SIZE / size_of::<usize>();
 
 #[repr(C)]
@@ -23,14 +24,14 @@ pub struct Thread {
 
 
 impl Thread {
-    pub unsafe fn create<F: FnMut() + 'static>(pg: usize, mut f: F) -> KObjectRef<'static, Thread> {
+    pub unsafe fn create<F: FnMut() + 'static>(pg: usize, mut f: F) -> KObjectRef<Thread> {
         let th_ref = kobject_create!(Thread, pg);
         let th_ptr = th_ref.as_ptr();
 
         th_ref.map_meta(|th_meta| {
             th_ptr.write(Thread {
                 main: thread_start,
-                stack: Box::new_in([0; 256], th_meta.alloc.clone()),
+                stack: Box::new_in([0; STACK_LEN], th_meta.alloc.clone()),
                 saved: Default::default(),
                 userdata: Box::new_in(move || f(), th_meta.alloc.clone()),
             });

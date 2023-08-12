@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use super::{KObjectRef, KObjectArena, KObjectPtr};
-use super::{kobject_create, INVALID_KOBJECT_ID};
+use super::{kobject_create, INVALID_KOBJ_ID};
 use super::Label;
 
 pub struct Container {
@@ -29,7 +29,7 @@ impl Container {
     }
 
     pub fn get_slot(&mut self) -> Option<usize> {
-        let invalid_koptr = unsafe { KObjectPtr::new(INVALID_KOBJECT_ID) };
+        let invalid_koptr = unsafe { KObjectPtr::new(INVALID_KOBJ_ID) };
         if let Some(pos) = self.find_slot(invalid_koptr) {
             Some(pos)
         } else {

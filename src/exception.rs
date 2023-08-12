@@ -36,10 +36,11 @@ pub struct Info {
 #[derive(Debug)]
 #[repr(C)]
 pub struct Frame {
-    pstate:        u64,        // SPSR_EL1
-    address:       u64,        // ELR_EL1 return address
-    thread_id:     u64,        // TPIDR_EL1
-    va_table_base: u64,        // TTBR0_EL1
+    esr:           u64,        // ESR_EL2
+    pstate:        u64,        // SPSR_EL2
+    return_addr:   u64,        // ELR_EL2 return address
+    thread_addr:   u64,        // TPIDR_EL2
+    va_table_base: u64,        // TTBR0_EL2
     v:             [u128; 32], // SIMD registers
     x:             [u64;  29], // General purpose registers
     frame_pointer: u64,        // x29
@@ -66,6 +67,23 @@ const INTERRUPTS: &[(u32, &dyn Fn(u32, &Frame))] = &[
 
 #[no_mangle]
 pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
+    // crate::UART.map(|u| { use core::fmt::Write; write!(u, "exception taken 1\n") });
+    // crate::debug("exception taken");
+
+
+        // crate::UART.map(|uart| {
+            // let _ = write!(uart, "DEBUG @ Thread {:#x}:\n",
+                           // // utils::current_core(),
+                           // // utils::current_el(),
+                           // // 0,
+                           // // 0,
+                           // // a >> 6,
+                           // // thread::current_thread().map(|t| mm::pgid!(t as *const kobject::Thread as usize)).unwrap_or(0),
+                           // // 0,
+                           // 0,
+                           // );
+        // });
+
     match info.desc {
         Description::CurrentElSPx => match info.kind {
             Kind::IRQ => {
@@ -87,11 +105,13 @@ pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
                     thread::yield_to_next();
                 }
             }
-            _ => {
-                unimplemented!("kind {:?}", info)
+            Kind::Synchronous => {
+                // Ref https://developer.arm.com/documentation/ddi0595/2021-12/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-?lang=en#fieldset_0-24_0_8
+                unimplemented!("{:?}: exception class {:#b}", info, frame.esr >> 26)
             }
+            _ => unimplemented!("{:?}", info)
         }
-        _ => unimplemented!("desc {:?}", info)
+        _ => unimplemented!("{:?}", info)
     }
 }
 
@@ -121,9 +141,9 @@ pub fn load_table() {
 
 
 pub fn with_intr_disabled<F: Fn()>(f: F) {
-    interrupt_disable();
+    let old_mask = interrupt_disable();
     f();
-    interrupt_enable();
+    interrupt_mask_set(old_mask);
 }
 
 #[allow(dead_code)]
@@ -141,8 +161,25 @@ pub fn interrupt_enable() {
     }
 }
 
-pub fn interrupt_disable() {
+pub fn interrupt_disable() -> usize {
+    let old_mask = interrupt_mask_get();
     unsafe {
         asm!("msr DAIFSet, 7");
     }
+    old_mask
 }
+
+pub fn interrupt_mask_get() -> usize {
+    unsafe {
+        let mask: usize;
+        asm!("mrs {}, DAIF", out(reg) mask);
+        mask
+    }
+}
+
+pub fn interrupt_mask_set(mask: usize) {
+    unsafe {
+        asm!("msr DAIF, {}", in(reg) mask);
+    }
+}
+

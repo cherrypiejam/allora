@@ -1,9 +1,10 @@
 use core::arch::asm;
 
 use crate::kobject::{Container, Thread, ThreadRef};
-use crate::schedule::schedule;
+use crate::schedule::{schedule, schedule_rbs};
 use crate::exception::with_intr_disabled;
 use crate::kobject::KObjectRef;
+use crate::cpu_idle;
 
 pub const TIME_SLICE: u64 = 4;
 
@@ -13,7 +14,7 @@ pub fn spawn<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, mut f: F) {
     let th_page_id = ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
 
     let th_ref = unsafe {
-        Thread::create(th_page_id, move || { f(); loop {} })
+        Thread::create(th_page_id, move || { f(); cpu_idle(); })
     };
 
     ct_ref.as_mut().set_slot(th_slot, th_ref);
@@ -22,15 +23,30 @@ pub fn spawn<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, mut f: F) {
 }
 
 
-pub fn yield_to_next() {
-    schedule();
+pub fn spawn_thref<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, mut f: F) -> ThreadRef{
+    let th_slot = ct_ref.as_mut().get_slot().unwrap();
+    let th_page_id = ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
+
+    let th_ref = unsafe {
+        Thread::create(th_page_id, move || { f(); cpu_idle(); })
+    };
+
+    ct_ref.as_mut().set_slot(th_slot, th_ref);
+
+    ThreadRef(th_ref)
 }
 
-pub fn yield_with_insr_disabled() {
-    with_intr_disabled(|| {
-        schedule();
-    })
+
+pub fn yield_to_next() {
+    // schedule();
+    schedule_rbs()
 }
+
+// pub fn yield_with_insr_disabled() {
+    // with_intr_disabled(|| {
+        // schedule();
+    // })
+// }
 
 
 pub unsafe fn init_thread(th_ptr: *const Thread) {

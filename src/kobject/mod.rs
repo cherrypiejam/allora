@@ -17,8 +17,9 @@ use crate::KOBJECTS;
 const INVALID_KOBJ_ID: usize = usize::MAX;
 const KOBJ_DESCR_LEN: usize = 32;
 
-pub struct ThreadRef<'a>(pub KObjectRef<'a, Thread>);
-unsafe impl Send for ThreadRef<'_> {}
+#[derive(Clone)]
+pub struct ThreadRef(pub KObjectRef<Thread>);
+unsafe impl Send for ThreadRef {}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum KObjectKind {
@@ -30,17 +31,17 @@ pub enum KObjectKind {
 
 // All metadata are stored in a global array, indexed by its page number
 // All KO object are stored at the beginning of their page
-pub struct KObjectMeta<'a, 'b> {
+pub struct KObjectMeta {
     pub koptr: KObjectPtr,
-    pub parent: Option<KObjectRef<'a, Container>>,
-    pub label: Option<KObjectRef<'b, Label>>,
+    pub parent: Option<KObjectRef<Container>>,
+    pub label: Option<KObjectRef<Label>>,
     pub alloc: KObjectArena, // if oom, get one page from its page tree
     pub kind: KObjectKind,
     pub free_pages: PageTree,
     pub descr: [u8; KOBJ_DESCR_LEN],
 }
 
-impl KObjectMeta<'_, '_> {
+impl KObjectMeta {
     pub fn empty() -> Self {
         KObjectMeta {
             koptr: unsafe { KObjectPtr::null() },
@@ -110,29 +111,29 @@ impl KObjectPtr {
     }
 }
 
-impl<T> From<KObjectRef<'_, T>> for KObjectPtr {
-    fn from(value: KObjectRef<'_, T>) -> Self {
+impl<T> From<KObjectRef<T>> for KObjectPtr {
+    fn from(value: KObjectRef<T>) -> Self {
         KObjectPtr { id: value.id }
     }
 }
 
 // #[derive(Clone)]
-pub struct KObjectRef<'a, T> {
+pub struct KObjectRef<T> {
     id: usize,
-    _type: PhantomData<&'a T>
+    _type: PhantomData<T>
 }
 
 // impl<T: Clone> Copy for KObjectRef<T> {}
-impl<T> Clone for KObjectRef<'_, T> {
+impl<T> Clone for KObjectRef<T> {
     fn clone(&self) -> Self {
         unsafe {
             KObjectRef::new(self.id)
         }
     }
 }
-impl<T> Copy for KObjectRef<'_, T> {}
+impl<T> Copy for KObjectRef<T> {}
 
-impl<T> KObjectRef<'_, T> {
+impl<T> KObjectRef<T> {
     pub unsafe fn new(id: usize) -> Self {
         KObjectRef { id, _type: PhantomData }
     }
@@ -158,7 +159,7 @@ impl<T> KObjectRef<'_, T> {
 
 macro_rules! impl_from_koptr_for_koref {
     ($t: ident) => {
-        impl From<KObjectPtr> for KObjectRef<'_, $t> {
+        impl From<KObjectPtr> for KObjectRef<$t> {
             fn from(value: KObjectPtr) -> Self {
                 unsafe {
                     KObjectRef::new(value.id)
@@ -196,9 +197,9 @@ macro_rules! kobject_create_with_description {
 pub(crate) use kobject_create;
 pub(crate) use kobject_create_with_description;
 
-unsafe fn __kobject_create<'a, T>(kind: KObjectKind, page_id: usize, descr: &str) -> KObjectRef<'a, T>
+unsafe fn __kobject_create<T>(kind: KObjectKind, page_id: usize, descr: &str) -> KObjectRef<T>
 where
-    KObjectRef<'a, T>: From<KObjectPtr>
+    KObjectRef<T>: From<KObjectPtr>
 {
     KOBJECTS.map(|(kobjs, ofs)| {
         let id = page_id - *ofs;
@@ -217,13 +218,12 @@ where
             free_pages: PageTree::empty(),
             descr: {
                 let mut buf = [0u8; KOBJ_DESCR_LEN];
-                buf.copy_from_slice(&descr.as_bytes()[0..(
-                    if descr.len() > KOBJ_DESCR_LEN {
-                        KOBJ_DESCR_LEN
-                    } else {
-                        descr.len()
-                    })
-                ]);
+                let len = if descr.len() > KOBJ_DESCR_LEN {
+                    KOBJ_DESCR_LEN
+                } else {
+                    descr.len()
+                };
+                buf[..len].copy_from_slice(&descr.as_bytes()[..len]);
                 buf
             }
         };

@@ -35,24 +35,30 @@ context_stack:
     stp q2, q3, [sp, -32]!
     stp q0, q1, [sp, -32]!
 
-    mrs x8, TPIDR_EL1
-    mrs x9, TTBR0_EL1
+    mrs x8, TPIDR_EL2
+    mrs x9, TTBR0_EL2
     stp x8, x9, [sp, -16]!
 
-    mrs x8, SPSR_EL1
-    mrs x9, ELR_EL1
+    mrs x8, SPSR_EL2
+    mrs x9, ELR_EL2
     stp x8, x9, [sp, -16]!
+
+    mrs x8, ESR_EL2
+    str x8, [sp, -8]!
     ret
 
 .globl context_restore
 context_restore:
-    ldp x0, x1, [sp], 16
-    msr SPSR_EL1, x0
-    msr ELR_EL1, x1
+    ldr x0, [sp], 8
+    msr ESR_EL2, x0
 
     ldp x0, x1, [sp], 16
-    msr TPIDR_EL1, x0
-    msr TTBR0_EL1, x1
+    msr SPSR_EL2, x0
+    msr ELR_EL2, x1
+
+    ldp x0, x1, [sp], 16
+    msr TPIDR_EL2, x0
+    msr TTBR0_EL2, x1
 
     ldp q0, q1, [sp], 32
     ldp q2, q3, [sp], 32

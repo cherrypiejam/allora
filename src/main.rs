@@ -114,18 +114,19 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 #[global_allocator]
 static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
-// Top-level memory allocator
-static MEM_POOL: mutex::Mutex<Option<mm::page::PageMap>> = mutex::Mutex::new(None);
-
-// Label-specific memory allocator
-static LOCAL_MEM_POOL: mutex::Mutex<Option<Vec<mm::page::LabeledPageSet>>> = mutex::Mutex::new(None);
-
 // LEAK: must be wait-free
 static KOBJECTS: mutex::Mutex<Option<(Vec<kobject::KObjectMeta>, usize)>> = mutex::Mutex::new(None);
 static READY_LIST: mutex::Mutex<Option<VecDeque<kobject::ThreadRef>>> = mutex::Mutex::new(None);
 
+
+struct ResourceBlock {
+    time_slices: [Option<kobject::ThreadRef>; 2],
+    hand: usize,
+}
+static RESBLOCKS: mutex::Mutex<Option<(Vec<ResourceBlock>, usize)>> = mutex::Mutex::new(None);
+
+
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
-const APP_ENABLE: bool = false;
 
 #[no_mangle]
 pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _ttbr0_el1: u64, _x3: u64) {
@@ -262,13 +263,14 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     }
 
     READY_LIST.lock().replace(VecDeque::new());
+    RESBLOCKS.lock().replace((Vec::new(), 0));
 
     #[cfg(test)]
     test_main();
 
-
-
-    // UART.map(|u| writeln!(u, "EL: {}, CORE: {}, _start_addr: {:#x}", utils::current_el(), utils::current_core(), _start_addr));
+    use alloc::format;
+    debug(&format!("Booting allora..."));
+    debug(&format!("starting address: {:#x}", _start_addr));
 
     // Initialize kernel objects
     use kobject::{KObjectMeta, KObjectRef, Container, Thread};
@@ -285,8 +287,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
             KOBJECTS.map(|(ks, _)| ks.push(KObjectMeta::empty()));
         });
 
-
-    // UART.map(|u| writeln!(u, "heap_start: {}, heap_size: {}, mem_start: {}, mem_size: {}", hstart, hsize, mem_start, mem_size));
+    debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
 
     let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
     let page = page_tree.get().unwrap();
@@ -312,36 +313,48 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     root_ct_ref.as_mut().set_slot(th_slot, main_th_ref);
 
 
-    thread::spawn(root_ct_ref, || {
-        loop {
-            exception::with_intr_disabled(|| {
-                UART.map(|uart| {
-                    let _ = write!(uart, "Core {}, thread 2\n", utils::current_core());
-                });
-            });
+    // let thref = thread::spawn_thref(root_ct_ref, || {
+        // cpu_idle_debug();
+    // });
 
-            exception::with_intr_disabled(|| unsafe { asm!("wfi") });
-        }
-    });
+    let mut rb = ResourceBlock {
+        time_slices: [None, None],
+        hand: 0,
+    };
+    rb.time_slices[0] = Some(thread::spawn_thref(
+        root_ct_ref,
+        // || cpu_idle(),
+        || cpu_idle_debug("idle2"),
+    ));
+    rb.time_slices[1] = Some(thread::spawn_thref(
+        root_ct_ref,
+        || cpu_idle_debug("idle2"),
+        // || cpu_idle(),
+    ));
+    RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
 
-    // cpu_idle();
+    // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });
 
-    loop {
-        exception::with_intr_disabled(|| {
-            UART.map(|uart| {
-                let _ = write!(uart, "Core {}, thread 1\n", utils::current_core());
-            });
-        });
-
-        exception::with_intr_disabled(|| unsafe { asm!("wfi") });
-    }
+    // cpu_idle_debug("idle");
+    // cpu_idle_debug("idle");
+    cpu_idle();
 
 }
 
+
 pub fn cpu_idle() -> ! {
     loop {
+        // ensure CPU waking up first
         exception::with_intr_disabled(|| unsafe {
-            // ensure CPU waking up first
+            asm!("wfi");
+        });
+    }
+}
+
+pub fn cpu_idle_debug(msg: &str) -> ! {
+    loop {
+            debug(msg);
+        exception::with_intr_disabled(|| unsafe {
             asm!("wfi");
         });
     }
@@ -387,17 +400,40 @@ impl<T: Fn()> Testable for T {
 pub fn debug(msg: &str) {
     exception::with_intr_disabled(|| {
         UART.map(|uart| {
-            let _ = write!(uart, "Core{} EL{} DEBUG: {}\n", utils::current_core(), utils::current_el(), msg);
+            let _ = write!(uart, "DEBUG @ Thread {:#x}: {}\n",
+                           thread::current_thread().map(|t| mm::pgid!(t as *const kobject::Thread as usize)).unwrap_or(0),
+                           msg);
         });
     })
 }
 
 
-pub fn debug_option<T: core::fmt::Debug>(msg: &str, val: Option<T>) {
-    exception::with_intr_disabled(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "Core{} EL{} DEBUG: msg: {}, val: {:?}\n", utils::current_core(), utils::current_el(), msg, val);
-        });
-    })
-}
+// pub fn debug(msg: &str) {
+    // exception::with_intr_disabled(|| {
+        // UART.map(|uart| {
+            // let _ = write!(uart, "DEBUG @ Thread {:#x}: {}, {}\n",
+                           // // thread::current_thread().map(|t| mm::pgid!(t as *const kobject::Thread as usize)).unwrap_or(0),
+                           // 0,
+                           // msg,
+                           // 0
+                           // );
+        // });
+    // })
+// }
+
+
+// pub fn debug(msg: &str) {
+    // let a = exception::interrupt_mask_get();
+    // exception::with_intr_disabled(|| {
+        // UART.map(|uart| {
+            // let _ = write!(uart, "DEBUG {}{} {:b} @ Thread {:#x}: {}\n",
+                           // utils::current_core(),
+                           // utils::current_el(),
+                           // a >> 6,
+                           // thread::current_thread().map(|t| mm::pgid!(t as *const kobject::Thread as usize)).unwrap_or(0),
+                           // msg,
+                           // );
+        // });
+    // })
+// }
 
