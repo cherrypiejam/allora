@@ -8,11 +8,7 @@ use crate::RESBLOCKS;
 
 pub fn schedule_rbs() {
 
-    use alloc::format;
-    // crate::debug("begin schedule");
-
     if let Some(curr) = current_thread().map(|t| t as *mut Thread) {
-        // crate::debug(&format!("begin 1 {:b}", crate::exception::interrupt_mask_get() >> 6));
 
         let ts = RESBLOCKS
             .lock()
@@ -22,33 +18,25 @@ pub fn schedule_rbs() {
                 if rbs.is_empty() {
                     None
                 } else {
-
-                    // crate::debug(&format!("begin 3"));
-
                     assert!(rbs.len() > *hand);
 
                     let rb = &mut rbs[*hand];
                     let ts = rb.time_slices[rb.hand].clone();
 
                     rb.hand = (rb.hand + 1) % rb.time_slices.len();
-                    // crate::debug(&format!("next rb hand {}", rb.hand));
                     *hand = (*hand + 1) % rbs.len();
-
-                    // crate::debug(&format!("next hand {}", *hand));
 
                     ts
                 }
             });
 
         if let Some(tref) = ts {
-            // crate::debug("begin 2");
             unsafe {
                 switch(curr, tref.0.as_ptr())
             }
         }
 
     }
-    // crate::debug("end schedule");
 
 }
 

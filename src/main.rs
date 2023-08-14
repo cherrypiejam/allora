@@ -317,19 +317,41 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         // cpu_idle_debug();
     // });
 
-    let mut rb = ResourceBlock {
-        time_slices: [None, None],
-        hand: 0,
-    };
-    rb.time_slices[0] = Some(thread::spawn_thref(
-        root_ct_ref,
-        || cpu_idle_debug("idling"),
-    ));
-    rb.time_slices[1] = Some(thread::spawn_thref(
-        root_ct_ref,
-        || cpu_idle_debug("idling"),
-    ));
-    RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
+
+    exception::with_intr_disabled(move || {
+
+        let mut rb = ResourceBlock {
+            time_slices: [None, None],
+            hand: 0,
+        };
+        rb.time_slices[0] = Some(thread::spawn_thref(
+            root_ct_ref,
+            || cpu_idle_debug("idling"),
+        ));
+        rb.time_slices[1] = Some(thread::spawn_thref(
+            root_ct_ref,
+            || cpu_idle_debug("idling"),
+        ));
+
+        RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
+
+
+        let mut rb = ResourceBlock {
+            time_slices: [None, None],
+            hand: 0,
+        };
+        rb.time_slices[0] = Some(thread::spawn_thref(
+            root_ct_ref,
+            || cpu_idle_debug("idling"),
+        ));
+        rb.time_slices[1] = Some(thread::spawn_thref(
+            root_ct_ref,
+            || cpu_idle_debug("idling"),
+        ));
+
+        RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
+    });
+
 
     // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });
 
