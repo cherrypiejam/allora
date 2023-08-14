@@ -26,7 +26,6 @@ mod collections;
 mod mm;
 mod exception;
 mod timer;
-mod label;
 mod kobject;
 mod schedule;
 mod switch;
@@ -311,11 +310,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     };
 
     root_ct_ref.as_mut().set_slot(th_slot, main_th_ref);
-
-
-    // let thref = thread::spawn_thref(root_ct_ref, || {
-        // cpu_idle_debug();
-    // });
 
 
     exception::with_intr_disabled(move || {
