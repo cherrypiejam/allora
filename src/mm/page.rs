@@ -4,7 +4,7 @@ use core::ops::DerefMut;
 use alloc::collections::BTreeMap;
 
 use crate::collections::bitmap::Bitmap;
-use crate::label::Label;
+// use crate::label::Label;
 
 const PAGE_BITS: usize = 12;
 pub const PAGE_SIZE: usize = 1 << PAGE_BITS;
@@ -128,41 +128,41 @@ impl PageSet {
     }
 }
 
-pub struct LabeledPageSet {
-    inner: PageSet,
-    label: Label,
-}
+// pub struct LabeledPageSet {
+    // inner: PageSet,
+    // label: Label,
+// }
 
-impl LabeledPageSet {
-    pub fn new(label: Label) -> Self {
-        Self {
-            inner: PageSet::new(),
-            label,
-        }
-    }
+// impl LabeledPageSet {
+    // pub fn new(label: Label) -> Self {
+        // Self {
+            // inner: PageSet::new(),
+            // label,
+        // }
+    // }
 
-    pub fn borrow(&self) -> &PageSet {
-        &self.inner
-    }
+    // pub fn borrow(&self) -> &PageSet {
+        // &self.inner
+    // }
 
-    pub fn borrow_mut(&mut self) -> &mut PageSet {
-        &mut self.inner
-    }
+    // pub fn borrow_mut(&mut self) -> &mut PageSet {
+        // &mut self.inner
+    // }
 
-    pub fn label(&self) -> Label {
-        self.label.clone()
-    }
-}
+    // pub fn label(&self) -> Label {
+        // self.label.clone()
+    // }
+// }
 
-impl Deref for LabeledPageSet {
-    type Target = PageSet;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
+// impl Deref for LabeledPageSet {
+    // type Target = PageSet;
+    // fn deref(&self) -> &Self::Target {
+        // &self.inner
+    // }
+// }
 
-impl DerefMut for LabeledPageSet {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
+// impl DerefMut for LabeledPageSet {
+    // fn deref_mut(&mut self) -> &mut Self::Target {
+        // &mut self.inner
+    // }
+// }

@@ -268,7 +268,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     test_main();
 
     use alloc::format;
-    debug(&format!("Booting allora..."));
+    debug("Booting allora...");
     debug(&format!("starting address: {:#x}", _start_addr));
 
     // Initialize kernel objects

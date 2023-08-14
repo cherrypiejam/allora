@@ -20,39 +20,26 @@ impl Label {
 
         lb_ref
     }
-}
 
-impl IsLabel for Label {
-    fn lub(self, rhs: Self) -> Self {
-        // TODO: problem?
-        Label {
-            inner: self.inner.lub(rhs.inner)
-        }
-    }
+    // IsLabel and HasPrivilege contain trait functions that consume the struct
+    // We write our own here because it requires extra custom allocator for
+    // the allocation.
+    // TODO: add these methods when needed
 
-    fn glb(self, rhs: Self) -> Self {
-        Label {
-            inner: self.inner.glb(rhs.inner)
-        }
-    }
-
-    fn can_flow_to(&self, rhs: &Self) -> bool {
+    pub fn can_flow_to(&self, rhs: &Self) -> bool {
         self.inner.can_flow_to(&rhs.inner)
     }
+
+    pub fn can_flow_to_with_privilege(&self, rhs: &Self, privilege: &Privilege) -> bool {
+        self.inner.can_flow_to_with_privilege(&rhs.inner, &privilege.inner)
+    }
+
+    // fn lub() {}
+    // fn glb() {}
+    // fn downgrade() {}
+    // fn downgrade_to() {}
 }
 
-impl HasPrivilege for Label {
-    type Privilege = Component<KObjectArena>;
-
-    fn downgrade(self, privilege: &Self::Privilege) -> Self {
-        todo!()
-    }
-
-    fn downgrade_to(self, target: Self, privilege: &Self::Privilege) -> Self {
-        todo!()
-    }
-
-    fn can_flow_to_with_privilege(&self, rhs: &Self, privilege: &Self::Privilege) -> bool {
-        todo!()
-    }
+pub struct Privilege {
+    inner: Component<KObjectArena>,
 }
