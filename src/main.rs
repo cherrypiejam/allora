@@ -49,6 +49,7 @@ use core::arch::{asm, global_asm};
 // use mm::page_tree;
 use mm::PAGE_SIZE;
 
+
 extern "C" {
     static HEAP_START: usize;
     fn system_off() -> !;
@@ -272,7 +273,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     debug(&format!("starting address: {:#x}", _start_addr));
 
     // Initialize kernel objects
-    use kobject::{KObjectMeta, KObjectRef, Container, Thread};
+    use kobject::{KObjectMeta, KObjectRef, Container, Thread, Label, THREAD_NPAGES};
     use mm::page_tree::PageTree;
     use mm::{page_align_up, page_align_down};
 
@@ -288,23 +289,40 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
 
-    let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
-    let page = page_tree.get().unwrap();
+    // let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
+    let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 20) };
 
+    // create the root container
+    let lb_page = page_tree.get().unwrap();
+    let lb_ref = unsafe {
+        Label::create(lb_page, "T,F")
+    };
+    let ct_page = page_tree.get().unwrap();
     let root_ct_ref = unsafe {
-        let ct_ref = Container::create(page, KObjectRef::new(0));
-        ct_ref.map_meta(move |ct_meta| {
-            ct_meta.free_pages = page_tree;
+        let ct_ref = Container::create(ct_page, KObjectRef::new(0));
+        ct_ref.map_meta(move |ct| {
+            ct.free_pages = page_tree;
+            ct.label = Some(lb_ref);
         });
         ct_ref
     };
+    lb_ref.map_meta(|lb| lb.parent = Some(root_ct_ref));
+
+
+    // init the main thread
+    let lb_slot = root_ct_ref.as_mut().get_slot().unwrap();
+    let lb_page_id = root_ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
+    let lb_ref = unsafe {
+        Label::create(lb_page_id, "T,F")
+    };
+    root_ct_ref.as_mut().set_slot(lb_slot, lb_ref);
 
     let th_slot = root_ct_ref.as_mut().get_slot().unwrap();
-    let th_page_id = root_ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
-
+    let th_page_id = root_ct_ref.map_meta(|m| m.free_pages.get_multiple(THREAD_NPAGES)).unwrap().unwrap();
 
     let main_th_ref = unsafe {
         let th_ref = Thread::create(th_page_id, || {});
+        th_ref.map_meta(|th| th.label = Some(lb_ref));
         thread::init_thread(th_ref.as_ptr());
         th_ref
     };
@@ -320,32 +338,33 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         };
         rb.time_slices[0] = Some(thread::spawn_thref(
             root_ct_ref,
+            "T,F",
             || cpu_idle_debug("idling"),
         ));
         rb.time_slices[1] = Some(thread::spawn_thref(
             root_ct_ref,
+            "T,F",
             || cpu_idle_debug("idling"),
         ));
 
         RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
 
 
-        let mut rb = ResourceBlock {
-            time_slices: [None, None],
-            hand: 0,
-        };
-        rb.time_slices[0] = Some(thread::spawn_thref(
-            root_ct_ref,
-            || cpu_idle_debug("idling"),
-        ));
-        rb.time_slices[1] = Some(thread::spawn_thref(
-            root_ct_ref,
-            || cpu_idle_debug("idling"),
-        ));
+        // let mut rb = ResourceBlock {
+            // time_slices: [None, None],
+            // hand: 0,
+        // };
+        // rb.time_slices[0] = Some(thread::spawn_thref(
+            // root_ct_ref,
+            // || cpu_idle_debug("idling"),
+        // ));
+        // rb.time_slices[1] = Some(thread::spawn_thref(
+            // root_ct_ref,
+            // || cpu_idle_debug("idling"),
+        // ));
 
-        RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
+        // RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
     });
-
 
     // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });
 

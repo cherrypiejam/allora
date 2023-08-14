@@ -43,3 +43,17 @@ impl Label {
 pub struct Privilege {
     inner: Component<KObjectArena>,
 }
+
+impl KObjectRef<Label> {
+
+    pub fn can_flow_to(&self, rhs: &Self) -> bool {
+        self.as_ref()
+            .can_flow_to(rhs.as_ref())
+    }
+
+    pub fn can_flow_to_with_privilege(&self, rhs: &Self, privilege: &Privilege) -> bool {
+        self.as_ref()
+            .can_flow_to_with_privilege(rhs.as_ref(), privilege)
+    }
+
+}

@@ -154,6 +154,10 @@ impl<T> KObjectRef<T> {
         KObjectPtr::from(*self)
             .map_meta(f)
     }
+
+    pub fn label(&self) -> Option<KObjectRef<Label>> {
+        self.map_meta(|m| m.label).unwrap()
+    }
 }
 
 
