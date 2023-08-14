@@ -13,7 +13,7 @@ pub struct SavedFrame {
 pub const STACK_SIZE: usize = 4096;
 const STACK_LEN: usize = STACK_SIZE / size_of::<usize>();
 
-pub const THREAD_NPAGES: usize = 2; // FIXME: nit threads with 2 pages for a bigger stack
+pub const THREAD_NPAGES: usize = 2; // FIXME: init threads with 2 pages for a bigger stack
 
 #[repr(C)]
 pub struct Thread {
