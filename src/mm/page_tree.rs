@@ -185,7 +185,7 @@ impl PageTree {
         let clink = NonNull::new((PAGE_SIZE * n) as *mut PageNode);
         let mut blink = clink;
         let mut alink: PageLink;
-        let mut bcolor = blink.node().unwrap().color;
+        let mut bcolor = blink.node().map(|b| b.color).unwrap_or(Color::Red);
         if clink.left().is_none() {
             alink = clink.right();
             self.transplant(clink, clink.right());
