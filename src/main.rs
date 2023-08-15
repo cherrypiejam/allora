@@ -289,8 +289,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
 
-    // let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
-    let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 20) };
+    let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
 
     // create the root container
     let lb_page = page_tree.get().unwrap();
@@ -299,7 +298,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     };
     let ct_page = page_tree.get().unwrap();
     let root_ct_ref = unsafe {
-        let ct_ref = Container::create(ct_page, KObjectRef::new(0));
+        let ct_ref = Container::create(ct_page);
         ct_ref.map_meta(move |ct| {
             ct.free_pages = page_tree;
             ct.label = Some(lb_ref);
@@ -308,6 +307,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     };
     lb_ref.map_meta(|lb| lb.parent = Some(root_ct_ref));
 
+    debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
 
     // init the main thread
     let lb_slot = root_ct_ref.as_mut().get_slot().unwrap();
@@ -329,6 +329,24 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     root_ct_ref.as_mut().set_slot(th_slot, main_th_ref);
 
+    debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
+
+    //
+    //
+    //
+
+    let lb_slot = root_ct_ref.as_mut().get_slot().unwrap();
+    let lb_page = root_ct_ref.map_meta(|ct| ct.free_pages.get().unwrap()).unwrap();
+    let lb_ref = unsafe { Label::create(lb_page, "F,T") };
+    root_ct_ref.as_mut().set_slot(lb_slot, lb_ref);
+
+    let ct_slot = root_ct_ref.as_mut().get_slot().unwrap();
+    let ct_page = root_ct_ref.map_meta(|ct| ct.free_pages.get().unwrap()).unwrap();
+    let ct_ref = unsafe { Container::create(ct_page) };
+    root_ct_ref.as_mut().set_slot(ct_slot, ct_ref);
+    ct_ref.map_meta(|ct| ct.label = Some(lb_ref));
+
+    debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
 
     exception::with_intr_disabled(move || {
 
@@ -365,6 +383,8 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
         // RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
     });
+
+    thread::yield_to_next();
 
     // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });
 

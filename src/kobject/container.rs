@@ -17,7 +17,7 @@ impl Drop for Container {
 }
 
 impl Container {
-    pub unsafe fn create(page: usize, _label_ref: KObjectRef<Label>) -> KObjectRef<Container> {
+    pub unsafe fn create(page: usize) -> KObjectRef<Container> {
         let ct_ref = kobject_create!(Container, page);
         ct_ref
             .as_ptr()

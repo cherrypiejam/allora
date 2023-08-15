@@ -13,7 +13,9 @@ const BOTTOM: &str = "T,F";
 const TOP:    &str = "F,T";
 
 pub fn spawn<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, f: F) {
-    crate::READY_LIST.map(|l| l.push_back(spawn_thref(ct_ref, "T,F", f)));
+    crate::READY_LIST.map(|l| l.push_back(
+        spawn_thref(ct_ref, BOTTOM, f)
+    ));
 }
 
 
