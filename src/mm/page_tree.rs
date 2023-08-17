@@ -170,14 +170,20 @@ impl PageTree {
     }
 
     pub fn get_multiple(&mut self, npages: usize) -> Option<usize> {
-        let pages = self.traverse(); // FIXME: this traverse all pages
-        (0..(pages.len()-(npages-1)))
-            .find(|&i| ((i+1)..(i+npages)).all(|j| pages[j - 1] + 1 == pages[j]))
-            .map(|i| {
-                (i..(i+npages))
-                    .for_each(|j| unsafe { self.delete(pages[j]) });
-                pages[i]
-            })
+        let found = unsafe {
+            let mut cur = Self::min_link(self.root);
+            while cur.is_some() && !Self::is_n_consecutive_link(cur, npages) {
+                cur = Self::next_link(cur);
+            }
+            cur.node().map(|n| n.n)
+        };
+
+        if let Some(start) = found {
+            (start..(start+npages))
+                .for_each(|n| unsafe { self.delete(n) })
+        }
+
+        found
     }
 
     // Safety: depends on the given page number
@@ -422,6 +428,31 @@ impl PageTree {
         cur
     }
 
+    unsafe fn next_link(start: PageLink) -> PageLink {
+        if start.right().is_some() {
+            Self::min_link(start.right())
+        } else {
+            let mut cur = start;
+            while cur == cur.parent().right() {
+                cur = cur.parent();
+            }
+            cur.parent()
+        }
+    }
+
+    unsafe fn is_n_consecutive_link(start: PageLink, npages: usize) -> bool {
+        let mut cur = start;
+        for i in (1..npages) {
+            let next = Self::next_link(cur);
+            if next.node().map(|n| n.n) == start.node().map(|n| n.n + i) {
+                cur = next;
+            } else {
+                return false
+            }
+        }
+        true
+    }
+
 }
 
 
@@ -481,5 +512,37 @@ mod test {
 
         assert_eq!(pt.get(), None);
         assert_eq!(&*pt.traverse(), []);
+    }
+
+    #[test_case]
+    fn test_page_tree_remove_multiple() {
+        let mut pt = PageTree::empty();
+        let base = unsafe { &HEAP_START } as *const _ as usize + SIZE;
+        let base = page_align_up(base) / PAGE_SIZE;
+
+        unsafe {
+            pt.insert(base+2);
+            pt.insert(base+1);
+            pt.insert(base);
+            let start = PageTree::min_link(pt.root);
+            assert_eq!(start.node().map(|n| n.n), Some(base));
+            let next = PageTree::next_link(start);
+            assert_eq!(next.node().map(|n| n.n), Some(base+1));
+            let next = PageTree::next_link(next);
+            assert_eq!(next.node().map(|n| n.n), Some(base+2));
+            let next = PageTree::next_link(next);
+            assert_eq!(next.node().map(|n| n.n), None);
+
+
+            pt.insert(base+9);
+            pt.insert(base+8);
+
+            assert_eq!(pt.get_multiple(1), Some(base));
+            assert_eq!(pt.get_multiple(2), Some(base+1));
+            assert_eq!(pt.get_multiple(3), None);
+            assert_eq!(pt.get_multiple(4), None);
+            assert_eq!(pt.get_multiple(2), Some(base+8));
+        }
+
     }
 }
