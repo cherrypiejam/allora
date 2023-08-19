@@ -95,3 +95,37 @@ context_restore:
     ldp x26, x27, [sp], 16
     ldp x28, x29, [sp], 16
     ret
+
+// x0 = current_thread, x1 = next_thread
+.globl switch
+switch:
+    stp lr, xzr, [sp, -16]!
+    bl context_stack
+
+    // save current sp
+    mov x2, sp
+    str x2, [x0, 24]
+
+    // go to entry if first time
+    ldr x2, [x1, 24]
+    cbnz x2, restore
+
+entry:
+    msr TPIDR_EL2, x1
+    mov x0, x1
+
+    ldr x3, [x1, 8]
+    add x3, x3, 2, lsl 12 // XXX: hardcoded in
+    mov sp, x3
+
+    ldr x3, [x1, 0]
+    msr DAIFClr, 7
+    br x3
+
+restore:
+    // msr TPIDR_EL2, x1
+    mov sp, x2
+    bl context_restore
+    ldp lr, xzr, [sp], 16
+    ret
+
