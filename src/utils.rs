@@ -122,6 +122,12 @@ pub fn mb() {
     }
 }
 
+pub fn wfi() {
+    unsafe {
+        asm!("wfi");
+    }
+}
+
 pub fn current_core() -> usize {
     let core: usize;
     unsafe {

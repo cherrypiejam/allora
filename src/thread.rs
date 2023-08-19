@@ -1,7 +1,7 @@
 use core::arch::asm;
 
 use crate::kobject::{Container, Thread, Label, ThreadRef, THREAD_NPAGES};
-use crate::schedule::{schedule, schedule_rbs};
+use crate::schedule::{schedule, schedule_rbs, schedule_thread};
 use crate::exception::with_intr_disabled;
 use crate::kobject::KObjectRef;
 use crate::cpu_idle;
@@ -12,16 +12,17 @@ const PUBLIC: &str = "T,T";
 const BOTTOM: &str = "T,F";
 const TOP:    &str = "F,T";
 
-pub fn spawn<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, f: F) {
+pub fn spawn<F: FnOnce() + 'static>(ct_ref: KObjectRef<Container>, f: F) {
     crate::READY_LIST.map(|l| l.push_back(
-        spawn_thref(ct_ref, BOTTOM, f)
+        spawn_raw(ct_ref, BOTTOM, f)
     ));
 }
 
 
-pub fn spawn_thref<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, label: &str, mut f: F) -> ThreadRef {
+pub fn spawn_raw<F: FnOnce() + 'static>(ct_ref: KObjectRef<Container>, label: &str, f: F) -> ThreadRef {
+    // crate::debug("----- begin");
     let lb_slot = ct_ref.as_mut().get_slot().unwrap();
-    let lb_page_id = ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
+    let lb_page_id = ct_ref.map_meta(|ct| ct.free_pages.get()).unwrap().unwrap();
 
     let lb_ref = unsafe {
         Label::create(lb_page_id, label)
@@ -41,7 +42,7 @@ pub fn spawn_thref<F: FnMut() + 'static>(ct_ref: KObjectRef<Container>, label: &
     }
 
     let th_slot = ct_ref.as_mut().get_slot().unwrap();
-    let th_page_id = ct_ref.map_meta(|m| m.free_pages.get_multiple(THREAD_NPAGES)).unwrap().unwrap();
+    let th_page_id = ct_ref.map_meta(|ct| ct.free_pages.get_multiple(THREAD_NPAGES)).unwrap().unwrap();
     let th_ref = unsafe {
         Thread::create(th_page_id, move || { f(); cpu_idle(); })
     };
@@ -61,6 +62,12 @@ pub fn yield_to_next() {
     with_intr_disabled(|| {
         // schedule();
         schedule_rbs();
+    })
+}
+
+pub fn yield_to(next: ThreadRef) {
+    with_intr_disabled(|| {
+        schedule_thread(next)
     })
 }
 

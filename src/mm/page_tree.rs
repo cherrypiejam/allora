@@ -324,8 +324,9 @@ impl PageTree {
         }
     }
 
-    // FIXME: failed after exceeding limits
-    pub fn traverse(&mut self) -> heapless::Vec<usize, 1024> {
+    // FIXME: failed after exceeding limits, support custom allocator or impl Iterator instead
+    // Safety: calling it may corrupt the stack
+    pub unsafe fn traverse(&mut self) -> heapless::Vec<usize, 1024> {
         let mut stack = heapless::Vec::<PageLink, 1024>::new();
         let mut items = heapless::Vec::<usize, 1024>::new();
         let mut visited = heapless::LinearMap::<PageLink, (), 1024>::new();
@@ -502,16 +503,16 @@ mod test {
 
         unsafe {
             pt.init(start, PAGE_SIZE * 3);
+
+            assert_eq!(pt.get_multiple(2), Some(base));
+            assert_eq!(&*pt.traverse(), [base+2]);
+
+            assert_eq!(pt.get(), Some(base+2));
+            assert_eq!(&*pt.traverse(), []);
+
+            assert_eq!(pt.get(), None);
+            assert_eq!(&*pt.traverse(), []);
         }
-
-        assert_eq!(pt.get_multiple(2), Some(base));
-        assert_eq!(&*pt.traverse(), [base+2]);
-
-        assert_eq!(pt.get(), Some(base+2));
-        assert_eq!(&*pt.traverse(), []);
-
-        assert_eq!(pt.get(), None);
-        assert_eq!(&*pt.traverse(), []);
     }
 
     #[test_case]

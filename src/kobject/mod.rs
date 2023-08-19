@@ -17,7 +17,7 @@ use crate::KOBJECTS;
 const INVALID_KOBJ_ID: usize = usize::MAX;
 const KOBJ_DESCR_LEN: usize = 32;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ThreadRef(pub KObjectRef<Thread>);
 unsafe impl Send for ThreadRef {}
 
@@ -76,7 +76,7 @@ impl KObjectMeta {
 //      meta data acquires a lock, which may lead to a deadlock
 
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KObjectPtr {
     id: usize
 }

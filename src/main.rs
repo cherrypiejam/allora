@@ -28,7 +28,6 @@ mod exception;
 mod timer;
 mod kobject;
 mod schedule;
-mod switch;
 mod lfchannel;
 
 use virtio::VirtIORegs;
@@ -268,9 +267,8 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     #[cfg(test)]
     test_main();
 
-    use alloc::format;
-    debug("Booting allora...");
-    debug(&format!("starting address: {:#x}", _start_addr));
+    debug!("Booting allora...");
+    debug!("starting address: {:#x}", _start_addr);
 
     // Initialize kernel objects
     use kobject::{KObjectMeta, KObjectRef, Container, Thread, Label, THREAD_NPAGES};
@@ -287,7 +285,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
             KOBJECTS.map(|(ks, _)| ks.push(KObjectMeta::empty()));
         });
 
-    debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
+    debug!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size);
 
     let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
 
@@ -307,7 +305,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     };
     lb_ref.map_meta(|lb| lb.parent = Some(root_ct_ref));
 
-    debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
 
     // init the main thread
     let lb_slot = root_ct_ref.as_mut().get_slot().unwrap();
@@ -329,24 +326,83 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     root_ct_ref.as_mut().set_slot(th_slot, main_th_ref);
 
-    debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
-
     //
     //
     //
 
+    // Create a pool container
     let lb_slot = root_ct_ref.as_mut().get_slot().unwrap();
     let lb_page = root_ct_ref.map_meta(|ct| ct.free_pages.get().unwrap()).unwrap();
-    let lb_ref = unsafe { Label::create(lb_page, "F,T") };
+    let lb_ref = unsafe { Label::create(lb_page, "gongqi,gongqi") };
     root_ct_ref.as_mut().set_slot(lb_slot, lb_ref);
 
     let ct_slot = root_ct_ref.as_mut().get_slot().unwrap();
     let ct_page = root_ct_ref.map_meta(|ct| ct.free_pages.get().unwrap()).unwrap();
     let ct_ref = unsafe { Container::create(ct_page) };
     root_ct_ref.as_mut().set_slot(ct_slot, ct_ref);
-    ct_ref.map_meta(|ct| ct.label = Some(lb_ref));
 
-    debug(&format!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size));
+    // Move 10 pages from the container to the pool
+    // TODO: need checks
+    let npages = 300;
+    let page = root_ct_ref.map_meta(|ct| ct.free_pages.get_multiple(npages).unwrap()).unwrap();
+    ct_ref.map_meta(|ct| {
+        ct.label = Some(lb_ref);
+        (page..(page+npages))
+            .for_each(|p| unsafe { ct.free_pages.insert(p) });
+    });
+
+    // create a lf channel
+    let (tx, rx) = lfchannel::channel::<()>();
+
+    // create a scheduling thread
+    let scheduler = thread::spawn_raw(
+        ct_ref,
+        "T,F",
+        move || {
+            let rx = lfchannel::WrapperReceiver::new(rx);
+            let alloc = unsafe {
+                kobject::KObjectRef::<Thread>::new(
+                    thread::current_thread()
+                    .map(|t| mm::pgid!(t as *const kobject::Thread as usize))
+                    .unwrap()
+                )
+                .map_meta(|th| th.alloc.clone())
+                .unwrap()
+            };
+
+            let mut ready_list = Vec::<kobject::ThreadRef, _>::new_in(alloc.clone()); // use local allocator
+            let mut hand = 0;
+
+            loop {
+                if let Some(tasks) = rx.recv_in(alloc.clone()) {
+                    tasks
+                        .iter()
+                        .enumerate()
+                        .for_each(|(i, _)| {
+                            ready_list.push(thread::spawn_raw(
+                                ct_ref,
+                                "T,F",
+                                move || { loop { debug!("running task {}", i); } }
+                            ));
+                        });
+                }
+
+                if ready_list.is_empty() {
+                    utils::wfi();
+                } else {
+                    let next = ready_list[hand];
+                    hand = (hand + 1) % ready_list.len();
+                    thread::yield_to(next)
+                }
+
+                debug!("in loop");
+            }
+        }
+    );
+
+    // Send "tasks"
+    (0..2).for_each(|_| tx.send(()));
+
 
     exception::with_intr_disabled(move || {
 
@@ -354,39 +410,18 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
             time_slices: [None, None],
             hand: 0,
         };
-        rb.time_slices[0] = Some(thread::spawn_thref(
+        rb.time_slices[0] = Some(scheduler);
+        rb.time_slices[1] = Some(thread::spawn_raw(
             root_ct_ref,
-            "T,F",
-            || cpu_idle_debug("idling"),
-        ));
-        rb.time_slices[1] = Some(thread::spawn_thref(
-            root_ct_ref,
-            "T,F",
-            || cpu_idle_debug("idling"),
+            "gongqi,gongqi",
+            || cpu_idle_debug("CPU idling"),
         ));
 
         RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
 
-
-        // let mut rb = ResourceBlock {
-            // time_slices: [None, None],
-            // hand: 0,
-        // };
-        // rb.time_slices[0] = Some(thread::spawn_thref(
-            // root_ct_ref,
-            // || cpu_idle_debug("idling"),
-        // ));
-        // rb.time_slices[1] = Some(thread::spawn_thref(
-            // root_ct_ref,
-            // || cpu_idle_debug("idling"),
-        // ));
-
-        // RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
+        // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });
     });
 
-    thread::yield_to_next();
-
-    // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });
 
     cpu_idle();
 
@@ -396,17 +431,17 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 pub fn cpu_idle() -> ! {
     loop {
         // ensure CPU waking up first
-        exception::with_intr_disabled(|| unsafe {
-            asm!("wfi");
+        exception::with_intr_disabled(|| {
+            utils::wfi();
         });
     }
 }
 
 pub fn cpu_idle_debug(msg: &str) -> ! {
     loop {
-        debug(msg);
-        exception::with_intr_disabled(|| unsafe {
-            asm!("wfi");
+        debug!("{}", msg);
+        exception::with_intr_disabled(|| {
+            utils::wfi();
         });
     }
 }
@@ -447,30 +482,21 @@ impl<T: Fn()> Testable for T {
     }
 }
 
-
-pub fn debug(msg: &str) {
-    exception::with_intr_disabled(|| {
-        UART.map(|uart| {
-            let _ = write!(uart, "DEBUG @ Thread {:#x}: {}\n",
-                           thread::current_thread().map(|t| mm::pgid!(t as *const kobject::Thread as usize)).unwrap_or(0),
-                           msg);
-        });
-    })
+macro_rules! debug {
+    ($($arg:tt)*) => {
+        crate::exception::with_intr_disabled(|| {
+            crate::UART.map(|uart| {
+                use core::fmt::Write;
+                use crate::{thread, mm, kobject};
+                let thread_id = thread::current_thread().map(|t| mm::pgid!(t as *const kobject::Thread as usize)).unwrap_or(0);
+                let _prompt = write!(uart, "DEBUG @ Thread {:#x}: ", thread_id);
+                let _ = writeln!(uart, $($arg)*);
+            });
+        })
+    };
 }
 
+pub(crate) use debug;
 
-// pub fn debug(msg: &str) {
-    // let a = exception::interrupt_mask_get();
-    // exception::with_intr_disabled(|| {
-        // UART.map(|uart| {
-            // let _ = write!(uart, "DEBUG {}{} {:b} @ Thread {:#x}: {}\n",
-                           // utils::current_core(),
-                           // utils::current_el(),
-                           // a >> 6,
-                           // thread::current_thread().map(|t| mm::pgid!(t as *const kobject::Thread as usize)).unwrap_or(0),
-                           // msg,
-                           // );
-        // });
-    // })
-// }
+
 

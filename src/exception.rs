@@ -67,23 +67,6 @@ const INTERRUPTS: &[(u32, &dyn Fn(u32, &Frame))] = &[
 
 #[no_mangle]
 pub extern "C" fn exception_handler(info: Info, frame: &Frame) {
-    // crate::UART.map(|u| { use core::fmt::Write; write!(u, "exception taken 1\n") });
-    // crate::debug("exception taken");
-
-
-        // crate::UART.map(|uart| {
-            // let _ = write!(uart, "DEBUG @ Thread {:#x}:\n",
-                           // // utils::current_core(),
-                           // // utils::current_el(),
-                           // // 0,
-                           // // 0,
-                           // // a >> 6,
-                           // // thread::current_thread().map(|t| mm::pgid!(t as *const kobject::Thread as usize)).unwrap_or(0),
-                           // // 0,
-                           // 0,
-                           // );
-        // });
-
     match info.desc {
         Description::CurrentElSPx => match info.kind {
             Kind::IRQ => {

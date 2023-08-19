@@ -1,10 +1,13 @@
 use crate::kobject::{Thread, ThreadRef, KObjectRef};
-use crate::switch::switch;
+// use crate::switch::switch;
 use crate::thread::current_thread;
 use crate::mm::pgid;
 use crate::READY_LIST;
 use crate::RESBLOCKS;
 
+extern "C" {
+    pub fn switch(curr: *mut core::ffi::c_void, next: *mut core::ffi::c_void);
+}
 
 pub fn schedule_rbs() {
 
@@ -32,7 +35,7 @@ pub fn schedule_rbs() {
 
         if let Some(tref) = ts {
             unsafe {
-                switch(curr, tref.0.as_ptr())
+                switch(curr as *mut _, tref.0.as_ptr() as *mut _)
             }
         }
 
@@ -56,9 +59,10 @@ pub fn schedule() {
         });
 
         if let Some(next_ref) = next_ref {
+            crate::debug!("switch from {:p} to {:p}", curr, next_ref.0.as_ptr());
             // crate::UART.map(|u| { use core::fmt::Write; write!(u, "yield to {:#p}\n", next_ref.0.as_ptr()) });
             unsafe {
-                switch(curr, next_ref.0.as_ptr())
+                switch(curr as *mut _, next_ref.0.as_ptr() as *mut _)
             }
         }
 
@@ -67,4 +71,31 @@ pub fn schedule() {
 
 }
 
+pub fn schedule_list(list: &mut alloc::collections::VecDeque<ThreadRef>) {
+
+    if let Some(curr) = current_thread().map(|t| t as *mut Thread) {
+
+        if let Some(next_ref) = list.pop_front() {
+
+            list.push_back(ThreadRef(unsafe {
+                KObjectRef::new(pgid!(curr as *const _ as usize))
+            }));
+
+            unsafe {
+                switch(curr as *mut _, next_ref.0.as_ptr() as *mut _)
+            }
+
+        }
+
+    }
+
+}
+
+pub fn schedule_thread(next_ref: ThreadRef) {
+    if let Some(curr) = current_thread().map(|t| t as *mut Thread) {
+        unsafe {
+            switch(curr as *mut _, next_ref.0.as_ptr() as *mut _)
+        }
+    }
+}
 
