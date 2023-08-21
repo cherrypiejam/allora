@@ -115,7 +115,7 @@ entry:
     mov x0, x1
 
     ldr x3, [x1, 8]
-    add x3, x3, 2, lsl 12 // XXX: hardcoded in
+    add x3, x3, 4, lsl 12 // XXX: hardcoded in
     mov sp, x3
 
     ldr x3, [x1, 0]

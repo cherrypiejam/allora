@@ -29,6 +29,7 @@ mod timer;
 mod kobject;
 mod schedule;
 mod lfchannel;
+mod container;
 
 use virtio::VirtIORegs;
 
@@ -331,33 +332,30 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     //
 
     // Create a pool container
-    let lb_slot = root_ct_ref.as_mut().get_slot().unwrap();
-    let lb_page = root_ct_ref.map_meta(|ct| ct.free_pages.get().unwrap()).unwrap();
-    let lb_ref = unsafe { Label::create(lb_page, "gongqi,gongqi") };
-    root_ct_ref.as_mut().set_slot(lb_slot, lb_ref);
-
-    let ct_slot = root_ct_ref.as_mut().get_slot().unwrap();
-    let ct_page = root_ct_ref.map_meta(|ct| ct.free_pages.get().unwrap()).unwrap();
-    let ct_ref = unsafe { Container::create(ct_page) };
-    root_ct_ref.as_mut().set_slot(ct_slot, ct_ref);
-
+    let ct_ref = container::create(root_ct_ref, "gongqi,gongqi");
     // Move 10 pages from the container to the pool
-    // TODO: need checks
-    let npages = 300;
-    let page = root_ct_ref.map_meta(|ct| ct.free_pages.get_multiple(npages).unwrap()).unwrap();
-    ct_ref.map_meta(|ct| {
-        ct.label = Some(lb_ref);
-        (page..(page+npages))
-            .for_each(|p| unsafe { ct.free_pages.insert(p) });
-    });
+    container::move_npages(root_ct_ref, ct_ref, 300);
 
     // create a lf channel
     let (tx, rx) = lfchannel::channel::<()>();
 
+    // let scheduler = thread::spawn_raw(ct_ref, "gongqi,gongqi", move || {
+        // // let _buf = [0u64; 1 << 7];
+        // // debug!("1");
+        // // let _buf = [0u64; 148];
+        // // let _buf = [0u64; 4000];
+        // // debug!("2");
+        // let a = thread::spawn_raw(ct_ref, "gongqi,gongqi", || { loop { debug!("running a task"); } });
+        // loop {
+            // thread::yield_to(a);
+        // }
+    // });
+
     // create a scheduling thread
+    debug!("creating a scheduling thread");
     let scheduler = thread::spawn_raw(
         ct_ref,
-        "T,F",
+        "gongqi,gongqi",
         move || {
             let rx = lfchannel::WrapperReceiver::new(rx);
             let alloc = unsafe {
@@ -370,7 +368,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
                 .unwrap()
             };
 
-            let mut ready_list = Vec::<kobject::ThreadRef, _>::new_in(alloc.clone()); // use local allocator
+            let mut ready_list = Vec::<kobject::ThreadRef, _>::new_in(alloc.clone());
             let mut hand = 0;
 
             loop {
@@ -379,9 +377,10 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
                         .iter()
                         .enumerate()
                         .for_each(|(i, _)| {
+                            debug!("!!!!!!!!!!!!!!!!!!!!!!!!! creating a task thread !!!!");
                             ready_list.push(thread::spawn_raw(
                                 ct_ref,
-                                "T,F",
+                                "gongqi,gongqi",
                                 move || { loop { debug!("running task {}", i); } }
                             ));
                         });
@@ -401,7 +400,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     );
 
     // Send "tasks"
-    (0..2).for_each(|_| tx.send(()));
+    (0..1).for_each(|_| tx.send(()));
 
 
     exception::with_intr_disabled(move || {
@@ -412,7 +411,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         };
         rb.time_slices[0] = Some(scheduler);
         rb.time_slices[1] = Some(thread::spawn_raw(
-            root_ct_ref,
+            ct_ref,
             "gongqi,gongqi",
             || cpu_idle_debug("CPU idling"),
         ));

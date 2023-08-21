@@ -27,7 +27,20 @@ impl Label {
     // TODO: add these methods when needed
 
     pub fn can_flow_to(&self, rhs: &Self) -> bool {
-        self.inner.can_flow_to(&rhs.inner)
+        // crate::debug!("inner can flow to");
+
+        // let ax = Buckle::parse("gongqi,gongqi").unwrap();
+        // let bx = Buckle::parse("gongqi,gongqi").unwrap();
+        // assert!(ax.can_flow_to(&bx));
+
+        // let buf = [0x0usize; 4000];
+
+        // crate::debug!("1. inner {:#?} ", self.inner);
+        // crate::debug!("2. inner {:#?} ", rhs.inner);
+
+        let a = self.inner.can_flow_to(&rhs.inner);
+        // crate::debug!("inner can flow to");
+        a
     }
 
     pub fn can_flow_to_with_privilege(&self, rhs: &Self, privilege: &Privilege) -> bool {
@@ -47,8 +60,11 @@ pub struct Privilege {
 impl KObjectRef<Label> {
 
     pub fn can_flow_to(&self, rhs: &Self) -> bool {
-        self.as_ref()
-            .can_flow_to(rhs.as_ref())
+        // crate::debug!("can flow to");
+        let a = self.as_ref()
+            .can_flow_to(rhs.as_ref());
+        // crate::debug!("can flow to");
+        a
     }
 
     pub fn can_flow_to_with_privilege(&self, rhs: &Self, privilege: &Privilege) -> bool {
