@@ -448,12 +448,24 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     // What is a time slice?
     // An moving object?, An kernel object?
 
-    let a = thread::spawn_raw(ct_ref, "gongqi,gongqi", move || {
-        loop {
-            // get its own CPU resources -- time slices
-            // find by label
-            ts_ref.as_mut().slices[0] = kobject::TSlice::Slices(ts_ref_2);
+    let (slice_tx, slice_rx) = lfchannel::channel::<()>();
+
+    let some_scheduler = thread::spawn_raw(ct_ref, "gongqi,gongqi", move || {
+        for _ in 0..2 {
+            debug!("idle once in some scheduler");
+            exception::with_intr_disabled(|| utils::wfi());
         }
+
+        // get its own CPU resources -- time slices
+        // find by label
+
+        // modify its time slices
+        ts_ref.as_mut().slices[0] = kobject::TSlice::Slices(ts_ref_2);
+
+        // inform the target pool
+        slice_tx.send(()); // making it atomic w/ prev line?
+
+        cpu_idle_debug("idling in some scheduler")
     });
 
     exception::with_intr_disabled(move || {
@@ -464,21 +476,40 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
             time_slices: ts_ref,
         };
 
-        // rb.time_slices.as_mut().push(TSlice::Thread(scheduler));
-        rb.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
-            ct_ref,
-            "gongqi,gongqi",
-            || cpu_idle_debug("CPU idling"),
-        )));
+        rb.time_slices.as_mut().push(TSlice::Thread(some_scheduler));
+        // rb.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
+            // ct_ref,
+            // "gongqi,gongqi",
+            // || cpu_idle_debug("CPU idling"),
+        // )));
 
         let rb2 = ResourceBlock {
             time_slices: ts_ref_2,
         };
-        rb2.time_slices.as_mut().push(TSlice::Slices(ts_ref));
+        // rb2.time_slices.as_mut().push(TSlice::Slices(ts_ref));
         rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
             ct_ref,
             "gongqi,gongqi",
             || cpu_idle_debug("CPU idling for RB 2"),
+        )));
+
+        rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
+            ct_ref,
+            "gongqi,gongqi",
+            move || {
+                let slice_rx = lfchannel::WrapperReceiver::new(slice_rx);
+                loop {
+                    // TODO: use local allocator
+                    if let Some(slices) = slice_rx.recv() {
+                        for _ in slices {
+                            ts_ref_2.as_mut().push(TSlice::None)
+                        }
+                    }
+
+                    debug!("hhh");
+                    exception::with_intr_disabled(|| utils::wfi());
+                }
+            },
         )));
 
         RESBLOCKS.map(|(rbs, _)| {
