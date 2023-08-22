@@ -4,9 +4,41 @@ use crate::thread::current_thread;
 use crate::mm::pgid;
 use crate::READY_LIST;
 use crate::RESBLOCKS;
+use crate::TS;
+use crate::kobject::TimeSlices;
 
 extern "C" {
     pub fn switch(curr: *mut core::ffi::c_void, next: *mut core::ffi::c_void);
+}
+
+fn find_next_thread(tss_ref: KObjectRef<TimeSlices>) -> Option<ThreadRef> {
+    let tss_hand = TS
+        .lock()
+        .as_mut()
+        .and_then(|tss| {
+            tss.iter_mut()
+                .find(|(t, _)| *t == tss_ref)
+                .and_then(|(t, h)| {
+                    if t.as_ref().slices.is_empty() {
+                        None
+                    } else {
+                        let old_h = *h;
+                        *h = (*h + 1) % t.as_ref().slices.len();
+                        Some(old_h)
+                    }
+                })
+        });
+
+    use crate::kobject::TSlice;
+    tss_hand
+        .and_then(|tss_hand| {
+            let ts = &tss_ref.as_ref().slices[tss_hand];
+            match ts {
+                TSlice::None => None,
+                TSlice::Thread(th) => Some(th.clone()),
+                TSlice::Slices(tss) => find_next_thread(tss.clone()),
+            }
+        })
 }
 
 pub fn schedule_rbs() {
@@ -17,19 +49,18 @@ pub fn schedule_rbs() {
             .lock()
             .as_mut()
             .and_then(|(rbs, hand)| {
-
                 if rbs.is_empty() {
                     None
                 } else {
                     assert!(rbs.len() > *hand);
 
-                    let rb = &mut rbs[*hand];
-                    let ts = rb.time_slices[rb.hand].clone();
+                    let rb = {
+                        let old_hand = *hand;
+                        *hand = (*hand + 1) % rbs.len();
+                        &mut rbs[old_hand]
+                    };
 
-                    rb.hand = (rb.hand + 1) % rb.time_slices.len();
-                    *hand = (*hand + 1) % rbs.len();
-
-                    ts
+                    find_next_thread(rb.time_slices)
                 }
             });
 

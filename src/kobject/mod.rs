@@ -4,10 +4,12 @@ use core::marker::PhantomData;
 mod container;
 mod label;
 mod thread;
+mod time_slices;
 
 pub use container::Container;
 pub use label::Label;
 pub use thread::{Thread, STACK_SIZE, THREAD_NPAGES};
+pub use time_slices::{TimeSlices, TSlice};
 
 use crate::mm::page_tree::PageTree;
 use crate::mm::koarena::KObjectArena;
@@ -27,6 +29,7 @@ pub enum KObjectKind {
     Container,
     Label,
     Thread,
+    TimeSlices,
 }
 
 // All metadata are stored in a global array, indexed by its page number
@@ -123,6 +126,12 @@ pub struct KObjectRef<T> {
     _type: PhantomData<T>
 }
 
+impl<T> PartialEq for KObjectRef<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
 // impl<T: Clone> Copy for KObjectRef<T> {}
 impl<T> Clone for KObjectRef<T> {
     fn clone(&self) -> Self {
@@ -184,6 +193,7 @@ macro_rules! impl_from_koptr_for_koref {
 impl_from_koptr_for_koref!(Container);
 impl_from_koptr_for_koref!(Thread);
 impl_from_koptr_for_koref!(Label);
+impl_from_koptr_for_koref!(TimeSlices);
 
 
 macro_rules! kobject_create {

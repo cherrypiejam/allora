@@ -47,3 +47,5 @@ pub fn move_npages(ct_ref_1: KObjectRef<Container>, ct_ref_2: KObjectRef<Contain
             .for_each(|p| unsafe { ct.free_pages.insert(p) });
     });
 }
+
+pub fn move_time_slices() {}

@@ -118,12 +118,23 @@ static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::Loc
 static KOBJECTS: mutex::Mutex<Option<(Vec<kobject::KObjectMeta>, usize)>> = mutex::Mutex::new(None);
 static READY_LIST: mutex::Mutex<Option<VecDeque<kobject::ThreadRef>>> = mutex::Mutex::new(None);
 
+// #[derive(Clone)]
+// enum TimeSlice {
+    // None,
+    // Thread(kobject::ThreadRef),
+// }
+
+// struct VirtTimeSlices {
+    // slices: Vec<TimeSlice>,
+    // hand: usize,
+// }
 
 struct ResourceBlock {
-    time_slices: [Option<kobject::ThreadRef>; 2],
-    hand: usize,
+    time_slices: kobject::KObjectRef<kobject::TimeSlices>,
 }
 static RESBLOCKS: mutex::Mutex<Option<(Vec<ResourceBlock>, usize)>> = mutex::Mutex::new(None);
+
+static TS: mutex::Mutex<Option<Vec<(kobject::KObjectRef<kobject::TimeSlices>, usize)>>> = mutex::Mutex::new(None);
 
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
@@ -264,6 +275,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     READY_LIST.lock().replace(VecDeque::new());
     RESBLOCKS.lock().replace((Vec::new(), 0));
+    TS.lock().replace(Vec::new());
 
     #[cfg(test)]
     test_main();
@@ -333,7 +345,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // Create a pool container
     let ct_ref = container::create(root_ct_ref, "gongqi,gongqi");
-    // Move 10 pages from the container to the pool
     container::move_npages(root_ct_ref, ct_ref, 300);
 
     // create a lf channel
@@ -351,7 +362,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         // }
     // });
 
-    // create a scheduling thread
+    // create a scheduling thread for the pool
     debug!("creating a scheduling thread");
     let scheduler = thread::spawn_raw(
         ct_ref,
@@ -400,21 +411,76 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     );
 
     // Send "tasks"
-    (0..1).for_each(|_| tx.send(()));
+    (0..0).for_each(|_| tx.send(()));
 
+
+
+    // Create a TS object
+    let ts_slot = ct_ref.as_mut().get_slot().unwrap();
+    let ts_page_id = ct_ref.map_meta(|ct| ct.free_pages.get()).unwrap().unwrap();
+    let ts_ref = unsafe { kobject::TimeSlices::create(ts_page_id) };
+    ts_ref.map_meta(|ts| {
+        ts.parent = Some(ct_ref);
+    });
+    ct_ref.as_mut().set_slot(ts_slot, ts_ref);
+
+    TS.map(|ts| ts.push((ts_ref, 0)));
+
+
+    // Create another TS object, another label
+    let ts_slot = ct_ref.as_mut().get_slot().unwrap();
+    let ts_page_id = ct_ref.map_meta(|ct| ct.free_pages.get()).unwrap().unwrap();
+    let ts_ref_2 = unsafe { kobject::TimeSlices::create(ts_page_id) };
+    ts_ref_2.map_meta(|ts| {
+        ts.parent = Some(ct_ref);
+    });
+    ct_ref.as_mut().set_slot(ts_slot, ts_ref_2);
+
+    TS.map(|ts| ts.push((ts_ref_2, 0)));
+
+
+    // problem:
+    // let say we have 2 scheduling threads for two pools, A and B
+    // A has all slices
+    // Now A push 1 slice to B
+    //  1. A move the slice to its lf channel to B & marks this time slice B (be able to use)
+    //  2. B reads from the lf channel to know that it gets a new time slice
+    //      so that it can manage this time slice (be able to manage)
+    // What is a time slice?
+    // An moving object?, An kernel object?
 
     exception::with_intr_disabled(move || {
 
-        let mut rb = ResourceBlock {
-            time_slices: [None, None],
-            hand: 0,
+        use kobject::TSlice;
+
+        let rb = ResourceBlock {
+            time_slices: ts_ref,
         };
-        rb.time_slices[0] = Some(scheduler);
-        rb.time_slices[1] = Some(thread::spawn_raw(
+
+        rb.time_slices.as_mut().push(TSlice::Thread(scheduler));
+        rb.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
             ct_ref,
             "gongqi,gongqi",
             || cpu_idle_debug("CPU idling"),
-        ));
+        )));
+
+        let rb2 = ResourceBlock {
+            time_slices: ts_ref_2,
+        };
+        rb.time_slices.as_mut().push(TSlice::Slices(ts_ref_2));
+        rb.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
+            ct_ref,
+            "gongqi,gongqi",
+            || cpu_idle_debug("CPU idling for RB 2"),
+        )));
+
+
+        // rb.time_slices[0] = Some(scheduler);
+        // rb.time_slices[1] = Some(thread::spawn_raw(
+            // ct_ref,
+            // "gongqi,gongqi",
+            // || cpu_idle_debug("CPU idling"),
+        // ));
 
         RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
 
