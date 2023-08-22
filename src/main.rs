@@ -363,7 +363,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     // });
 
     // create a scheduling thread for the pool
-    debug!("creating a scheduling thread");
     let scheduler = thread::spawn_raw(
         ct_ref,
         "gongqi,gongqi",
@@ -449,6 +448,14 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     // What is a time slice?
     // An moving object?, An kernel object?
 
+    let a = thread::spawn_raw(ct_ref, "gongqi,gongqi", move || {
+        loop {
+            // get its own CPU resources -- time slices
+            // find by label
+            ts_ref.as_mut().slices[0] = kobject::TSlice::Slices(ts_ref_2);
+        }
+    });
+
     exception::with_intr_disabled(move || {
 
         use kobject::TSlice;
@@ -457,7 +464,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
             time_slices: ts_ref,
         };
 
-        rb.time_slices.as_mut().push(TSlice::Thread(scheduler));
+        // rb.time_slices.as_mut().push(TSlice::Thread(scheduler));
         rb.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
             ct_ref,
             "gongqi,gongqi",
@@ -467,22 +474,17 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         let rb2 = ResourceBlock {
             time_slices: ts_ref_2,
         };
-        rb.time_slices.as_mut().push(TSlice::Slices(ts_ref_2));
-        rb.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
+        rb2.time_slices.as_mut().push(TSlice::Slices(ts_ref));
+        rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
             ct_ref,
             "gongqi,gongqi",
             || cpu_idle_debug("CPU idling for RB 2"),
         )));
 
-
-        // rb.time_slices[0] = Some(scheduler);
-        // rb.time_slices[1] = Some(thread::spawn_raw(
-            // ct_ref,
-            // "gongqi,gongqi",
-            // || cpu_idle_debug("CPU idling"),
-        // ));
-
-        RESBLOCKS.map(|(rbs, _)| rbs.push(rb));
+        RESBLOCKS.map(|(rbs, _)| {
+            rbs.push(rb);
+            rbs.push(rb2);
+        });
 
         // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });
     });
