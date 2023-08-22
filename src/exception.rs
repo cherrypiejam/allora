@@ -123,7 +123,7 @@ pub fn load_table() {
 }
 
 
-pub fn with_intr_disabled<F: Fn()>(f: F) {
+pub fn with_intr_disabled<F: FnOnce()>(f: F) {
     let old_mask = interrupt_disable();
     f();
     interrupt_mask_set(old_mask);
