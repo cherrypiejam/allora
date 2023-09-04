@@ -53,6 +53,12 @@ impl Label {
     // fn downgrade_to() {}
 }
 
+impl PartialEq for Label {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.eq(&other.inner)
+    }
+}
+
 pub struct Privilege {
     inner: Component<KObjectArena>,
 }

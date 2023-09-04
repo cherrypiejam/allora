@@ -303,6 +303,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     let mut page_tree = unsafe { PageTree::new(mem_start, PAGE_SIZE * 512) };
 
     // create the root container
+    debug!("Initializing threads...");
     let lb_page = page_tree.get().unwrap();
     let lb_ref = unsafe {
         Label::create(lb_page, "T,F")
@@ -382,12 +383,12 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
             let mut hand = 0;
 
             loop {
+                // scheduling routine
                 if let Some(tasks) = rx.recv_in(alloc.clone()) {
                     tasks
                         .iter()
                         .enumerate()
                         .for_each(|(i, _)| {
-                            debug!("!!!!!!!!!!!!!!!!!!!!!!!!! creating a task thread !!!!");
                             ready_list.push(thread::spawn_raw(
                                 ct_ref,
                                 "gongqi,gongqi",
@@ -411,7 +412,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // Send "tasks"
     (0..0).for_each(|_| tx.send(()));
-
 
 
     // Create a TS object
@@ -440,13 +440,11 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // problem:
     // let say we have 2 scheduling threads for two pools, A and B
-    // A has all slices
-    // Now A push 1 slice to B
-    //  1. A move the slice to its lf channel to B & marks this time slice B (be able to use)
+    // Move one time slice from A to B in two steps:
+    //  1. A move the slice to its lf channel to B & marks this time slice B (can use)
     //  2. B reads from the lf channel to know that it gets a new time slice
-    //      so that it can manage this time slice (be able to manage)
-    // What is a time slice?
-    // An moving object?, An kernel object?
+    //      so that it can manage this time slice (can manage)
+
 
     let (slice_tx, slice_rx) = lfchannel::channel::<()>();
 
@@ -490,7 +488,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
             ct_ref,
             "gongqi,gongqi",
-            || cpu_idle_debug("CPU idling for RB 2"),
+            || cpu_idle_debug("CPU idling in RB 2"),
         )));
 
         rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
@@ -506,7 +504,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
                         }
                     }
 
-                    debug!("hhh");
+                    debug!("something");
                     exception::with_intr_disabled(|| utils::wfi());
                 }
             },
