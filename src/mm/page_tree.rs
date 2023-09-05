@@ -443,7 +443,7 @@ impl PageTree {
 
     unsafe fn is_n_consecutive_link(start: PageLink, npages: usize) -> bool {
         let mut cur = start;
-        for i in (1..npages) {
+        for i in 1..npages {
             let next = Self::next_link(cur);
             if next.node().map(|n| n.n) == start.node().map(|n| n.n + i) {
                 cur = next;
