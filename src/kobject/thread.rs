@@ -25,16 +25,14 @@ pub struct Thread {
 impl Thread {
     pub unsafe fn create<F: FnOnce() + 'static>(pg: usize, f: F) -> KObjectRef<Thread> {
         let th_ref = kobject_create!(Thread, pg);
-        let th_ptr = th_ref.as_ptr();
-
-        th_ref.map_meta(|th_meta| {
-            th_ptr.write(Thread {
+        th_ref
+            .as_ptr()
+            .write(Thread {
                 main: thread_start,
-                stack: Box::new_in([0; STACK_LEN], th_meta.alloc.clone()),
+                stack: Box::new_in([0; STACK_LEN], th_ref.meta().alloc.clone()),
                 saved_sp: 0,
-                userdata: Box::new_in(move || f(), th_meta.alloc.clone()),
+                userdata: Box::new_in(move || f(), th_ref.meta().alloc.clone()),
             });
-        });
 
         th_ref
     }

@@ -115,7 +115,6 @@ fn interrupts_for_node(node: &device_tree::Node) -> Option<Vec<u32>> {
 static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::LockedHeap::empty();
 
 // LEAK: must be wait-free
-static KOBJECTS: mutex::Mutex<Option<(Vec<kobject::KObjectMeta>, usize)>> = mutex::Mutex::new(None);
 static READY_LIST: mutex::Mutex<Option<VecDeque<kobject::ThreadRef>>> = mutex::Mutex::new(None);
 
 // #[derive(Clone)]
@@ -284,19 +283,8 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     debug!("starting address: {:#x}", _start_addr);
 
     // Initialize kernel objects
-    use kobject::{KObjectMeta, KObjectRef, Container, Thread, Label, THREAD_NPAGES};
+    use kobject::{KObjectRef, Container, Thread, Label, THREAD_NPAGES, KOBJ_NPAGES};
     use mm::page_tree::PageTree;
-    use mm::{page_align_up, page_align_down};
-
-    let npages = page_align_down(mem_size) / PAGE_SIZE;
-    KOBJECTS.lock().replace((
-        Vec::with_capacity(npages),
-        page_align_up(mem_start) / PAGE_SIZE,
-    ));
-    (0..npages)
-        .for_each(|_| {
-            KOBJECTS.map(|(ks, _)| ks.push(KObjectMeta::empty()));
-        });
 
     debug!("heap_start: {:#x}, heap_size: {:#x}, mem_start: {:#x}, mem_size: {:#x}", hstart, hsize, mem_start, mem_size);
 
@@ -304,41 +292,41 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // create the root container
     debug!("Initializing threads...");
-    let lb_page = page_tree.get().unwrap();
+    let lb_page = page_tree.get_multiple(KOBJ_NPAGES).unwrap();
     let lb_ref = unsafe {
         Label::create(lb_page, "T,F")
     };
-    let ct_page = page_tree.get().unwrap();
+    let ct_page = page_tree.get_multiple(KOBJ_NPAGES).unwrap();
     let root_ct_ref = unsafe {
         let ct_ref = Container::create(ct_page);
-        ct_ref.map_meta(move |ct| {
-            ct.free_pages = page_tree;
-            ct.label = Some(lb_ref);
-        });
+        ct_ref.meta_mut().free_pages = page_tree;
+        ct_ref.meta_mut().label = Some(lb_ref);
         ct_ref
     };
-    lb_ref.map_meta(|lb| lb.parent = Some(root_ct_ref));
+    lb_ref.meta_mut().parent = Some(root_ct_ref);
 
 
     // init the main thread
     let lb_slot = root_ct_ref.as_mut().get_slot().unwrap();
-    let lb_page_id = root_ct_ref.map_meta(|m| m.free_pages.get()).unwrap().unwrap();
+    let lb_page_id = root_ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
     let lb_ref = unsafe {
         Label::create(lb_page_id, "T,F")
     };
     root_ct_ref.as_mut().set_slot(lb_slot, lb_ref);
 
     let th_slot = root_ct_ref.as_mut().get_slot().unwrap();
-    let th_page_id = root_ct_ref.map_meta(|m| m.free_pages.get_multiple(THREAD_NPAGES)).unwrap().unwrap();
+    let th_page_id = root_ct_ref.meta_mut().free_pages.get_multiple(THREAD_NPAGES).unwrap();
 
     let main_th_ref = unsafe {
         let th_ref = Thread::create(th_page_id, || {});
-        th_ref.map_meta(|th| th.label = Some(lb_ref));
+        th_ref.meta_mut().label = Some(lb_ref);
         thread::init_thread(th_ref.as_ptr());
         th_ref
     };
 
     root_ct_ref.as_mut().set_slot(th_slot, main_th_ref);
+
+    debug!("Main thread initialized");
 
     //
     //
@@ -351,18 +339,6 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     // create a lf channel
     let (tx, rx) = lfchannel::channel::<()>();
 
-    // let scheduler = thread::spawn_raw(ct_ref, "gongqi,gongqi", move || {
-        // // let _buf = [0u64; 1 << 7];
-        // // debug!("1");
-        // // let _buf = [0u64; 148];
-        // // let _buf = [0u64; 4000];
-        // // debug!("2");
-        // let a = thread::spawn_raw(ct_ref, "gongqi,gongqi", || { loop { debug!("running a task"); } });
-        // loop {
-            // thread::yield_to(a);
-        // }
-    // });
-
     // create a scheduling thread for the pool
     let scheduler = thread::spawn_raw(
         ct_ref,
@@ -370,13 +346,14 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         move || {
             let rx = lfchannel::WrapperReceiver::new(rx);
             let alloc = unsafe {
-                kobject::KObjectRef::<Thread>::new(
+                KObjectRef::<Thread>::new(
                     thread::current_thread()
                     .map(|t| mm::pgid!(t as *const kobject::Thread as usize))
                     .unwrap()
                 )
-                .map_meta(|th| th.alloc.clone())
-                .unwrap()
+                .meta()
+                .alloc
+                .clone()
             };
 
             let mut ready_list = Vec::<kobject::ThreadRef, _>::new_in(alloc.clone());
@@ -416,11 +393,9 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // Create a TS object
     let ts_slot = ct_ref.as_mut().get_slot().unwrap();
-    let ts_page_id = ct_ref.map_meta(|ct| ct.free_pages.get()).unwrap().unwrap();
+    let ts_page_id = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
     let ts_ref = unsafe { kobject::TimeSlices::create(ts_page_id) };
-    ts_ref.map_meta(|ts| {
-        ts.parent = Some(ct_ref);
-    });
+    ts_ref.meta_mut().parent = Some(ct_ref);
     ct_ref.as_mut().set_slot(ts_slot, ts_ref);
 
     TS.map(|ts| ts.push((ts_ref, 0)));
@@ -428,11 +403,9 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // Create another TS object, another label
     let ts_slot = ct_ref.as_mut().get_slot().unwrap();
-    let ts_page_id = ct_ref.map_meta(|ct| ct.free_pages.get()).unwrap().unwrap();
+    let ts_page_id = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
     let ts_ref_2 = unsafe { kobject::TimeSlices::create(ts_page_id) };
-    ts_ref_2.map_meta(|ts| {
-        ts.parent = Some(ct_ref);
-    });
+    ts_ref_2.meta_mut().parent = Some(ct_ref);
     ct_ref.as_mut().set_slot(ts_slot, ts_ref_2);
 
     TS.map(|ts| ts.push((ts_ref_2, 0)));

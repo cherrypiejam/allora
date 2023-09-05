@@ -14,10 +14,10 @@ pub use time_slices::{TimeSlices, TSlice};
 use crate::mm::page_tree::PageTree;
 use crate::mm::koarena::KObjectArena;
 use crate::mm::{pa, PAGE_SIZE};
-use crate::KOBJECTS;
 
 const INVALID_KOBJ_ID: usize = usize::MAX;
 const KOBJ_DESCR_LEN: usize = 32;
+pub const KOBJ_NPAGES: usize = 2; // first: meta data; second: kobject
 
 #[derive(Clone, Copy)]
 pub struct ThreadRef(pub KObjectRef<Thread>);
@@ -32,12 +32,11 @@ pub enum KObjectKind {
     TimeSlices,
 }
 
-// All metadata are stored in a global array, indexed by its page number
-// All KO object are stored at the beginning of their page
+// A Kobject has a minimial 2 pages
+// The meta data of the kobject is stored at the first page
 pub struct KObjectMeta {
-    pub koptr: KObjectPtr,
-    pub parent: Option<KObjectRef<Container>>,
-    pub label: Option<KObjectRef<Label>>,
+    pub parent: Option<KObjectRef<Container>>, // TODO: atomic?
+    pub label: Option<KObjectRef<Label>>, // TODO: need to be atomic
     pub alloc: KObjectArena, // if oom, get one page from its page tree
     pub kind: KObjectKind,
     pub free_pages: PageTree,
@@ -47,7 +46,6 @@ pub struct KObjectMeta {
 impl KObjectMeta {
     pub fn empty() -> Self {
         KObjectMeta {
-            koptr: unsafe { KObjectPtr::null() },
             parent: None,
             label: None,
             alloc: KObjectArena::empty(),
@@ -62,6 +60,16 @@ impl KObjectMeta {
             .unwrap()
             .trim_end_matches(char::from(0))
     }
+
+    // fn as_ref<T>(&self) -> KObjectRef<T> {
+        // match self.kind {
+            // KObjectKind::None => todo!(),
+            // KObjectKind::Container => todo!(),
+            // KObjectKind::Label => todo!(),
+            // KObjectKind::Thread => todo!(),
+            // KObjectKind::TimeSlices => todo!(),
+        // }
+    // }
 }
 
 
@@ -100,18 +108,6 @@ impl KObjectPtr {
             false
         }
     }
-
-    pub fn map_meta<U, F: FnOnce(&mut KObjectMeta) -> U>(&self, f: F) -> Option<U> {
-        if self.is_null() {
-            None
-        } else {
-            KOBJECTS
-                .map(|(ks, ofs)| {
-                    let id = self.id - *ofs;
-                    f(&mut ks[id])
-                })
-        }
-    }
 }
 
 impl<T> From<KObjectRef<T>> for KObjectPtr {
@@ -142,13 +138,14 @@ impl<T> Clone for KObjectRef<T> {
 }
 impl<T> Copy for KObjectRef<T> {}
 
+
 impl<T> KObjectRef<T> {
     pub unsafe fn new(id: usize) -> Self {
         KObjectRef { id, _type: PhantomData }
     }
 
     pub fn as_ptr(&self) -> *mut T {
-        pa!(self.id) as *mut T
+        pa!(self.id + 1) as *mut T
     }
 
     pub fn as_ref(&self) -> &T {
@@ -159,13 +156,20 @@ impl<T> KObjectRef<T> {
         unsafe { &mut *self.as_ptr() }
     }
 
-    pub fn map_meta<U, F: FnOnce(&mut KObjectMeta) -> U>(&self, f: F) -> Option<U> {
-        KObjectPtr::from(*self)
-            .map_meta(f)
+    fn as_meta_ptr(&self) -> *mut KObjectMeta {
+        pa!(self.id) as *mut KObjectMeta
+    }
+
+    pub fn meta(&self) -> &KObjectMeta {
+        unsafe { &*self.as_meta_ptr() }
+    }
+
+    pub fn meta_mut(&self) -> &mut KObjectMeta {
+        unsafe { &mut *self.as_meta_ptr() }
     }
 
     pub fn label(&self) -> Option<KObjectRef<Label>> {
-        self.map_meta(|m| m.label).unwrap()
+        self.meta().label
     }
 }
 
@@ -198,35 +202,32 @@ impl_from_koptr_for_koref!(TimeSlices);
 
 macro_rules! kobject_create {
     ($kind: ident, $page_id: expr) => {
-        crate::kobject::__kobject_create::<$kind>(crate::kobject::KObjectKind::$kind, $page_id, "")
+        crate::kobject::_kobject_create::<$kind>(crate::kobject::KObjectKind::$kind, $page_id, "")
     };
 }
 
 macro_rules! kobject_create_with_description {
     ($kind: ident, $page_id: expr, $descr: expr) => {
-        crate::kobject::__kobject_create::<$kind>(crate::kobject::KObjectKind::$kind, $page_id, $descr)
+        crate::kobject::_kobject_create::<$kind>(crate::kobject::KObjectKind::$kind, $page_id, $descr)
     };
 }
 
 pub(crate) use kobject_create;
 pub(crate) use kobject_create_with_description;
 
-unsafe fn __kobject_create<T>(kind: KObjectKind, page_id: usize, descr: &str) -> KObjectRef<T>
+
+unsafe fn _kobject_create<T>(kind: KObjectKind, page_id: usize, descr: &str) -> KObjectRef<T>
 where
     KObjectRef<T>: From<KObjectPtr>
 {
-    KOBJECTS.map(|(kobjs, ofs)| {
-        let id = page_id - *ofs;
-
-        assert!(kobjs[id].kind == KObjectKind::None);
-
+    let ptr = pa!(page_id) as *mut KObjectMeta;
+    ptr.write(
         if let KObjectKind::Thread = kind {
-            kobjs[id] = KObjectMeta {
-                koptr: KObjectPtr::new(page_id),
+            KObjectMeta {
                 parent: None,
                 label: None,
                 alloc: KObjectArena::new(
-                    pa!(page_id) + size_of::<T>(),
+                    pa!(page_id + 1) + size_of::<T>(),
                     THREAD_NPAGES * PAGE_SIZE - size_of::<T>()
                 ),
                 kind,
@@ -241,14 +242,13 @@ where
                     buf[..len].copy_from_slice(&descr.as_bytes()[..len]);
                     buf
                 }
-            };
+            }
         } else {
-            kobjs[id] = KObjectMeta {
-                koptr: KObjectPtr::new(page_id),
+            KObjectMeta {
                 parent: None,
                 label: None,
                 alloc: KObjectArena::new(
-                    pa!(page_id) + size_of::<T>(),
+                    pa!(page_id + 1) + size_of::<T>(),
                     PAGE_SIZE - size_of::<T>()
                 ),
                 kind,
@@ -263,10 +263,9 @@ where
                     buf[..len].copy_from_slice(&descr.as_bytes()[..len]);
                     buf
                 }
-            };
+            }
         }
+    );
 
-        kobjs[id].koptr.into()
-    })
-    .unwrap()
+    KObjectRef::new(page_id)
 }

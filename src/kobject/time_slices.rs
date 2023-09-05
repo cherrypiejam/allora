@@ -23,7 +23,7 @@ impl TimeSlices {
         ct_ref
             .as_ptr()
             .write(TimeSlices {
-                slices: Vec::new_in(ct_ref.map_meta(|m| m.alloc.clone()).unwrap()),
+                slices: Vec::new_in(ct_ref.meta().alloc.clone()),
             });
 
         ct_ref

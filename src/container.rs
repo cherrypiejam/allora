@@ -1,4 +1,4 @@
-use crate::kobject::{KObjectRef, Container, Label};
+use crate::kobject::{KObjectRef, Container, Label, KOBJ_NPAGES};
 use crate::thread;
 
 pub fn create(ct_ref: KObjectRef<Container>, label: &str) -> KObjectRef<Container> {
@@ -11,17 +11,15 @@ pub fn create(ct_ref: KObjectRef<Container>, label: &str) -> KObjectRef<Containe
     }
 
     let lb_slot = ct_ref.as_mut().get_slot().unwrap();
-    let lb_page = ct_ref.map_meta(|ct| ct.free_pages.get().unwrap()).unwrap();
+    let lb_page = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
     let lb_ref = unsafe { Label::create(lb_page, label) };
     ct_ref.as_mut().set_slot(lb_slot, lb_ref);
 
     let new_ct_slot = ct_ref.as_mut().get_slot().unwrap();
-    let new_ct_page = ct_ref.map_meta(|ct| ct.free_pages.get().unwrap()).unwrap();
+    let new_ct_page = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
     let new_ct_ref = unsafe { Container::create(new_ct_page) };
     ct_ref.as_mut().set_slot(new_ct_slot, new_ct_ref);
-    new_ct_ref.map_meta(|ct| {
-        ct.label = Some(lb_ref);
-    });
+    new_ct_ref.meta_mut().label = Some(lb_ref);
 
     new_ct_ref
 }
@@ -41,11 +39,11 @@ pub fn move_npages(ct_ref_1: KObjectRef<Container>, ct_ref_2: KObjectRef<Contain
         // panic!("fail to move {} pages", npages);
     // }
 
-    let page = ct_ref_1.map_meta(|ct| ct.free_pages.get_multiple(npages).unwrap()).unwrap();
-    ct_ref_2.map_meta(|ct| {
-        (page..(page+npages))
-            .for_each(|p| unsafe { ct.free_pages.insert(p) });
-    });
+    let page = ct_ref_1.meta_mut().free_pages.get_multiple(npages).unwrap();
+    (page..(page+npages))
+        .for_each(|p| unsafe {
+            ct_ref_2.meta_mut().free_pages.insert(p)
+        });
 }
 
 pub fn move_time_slices() {}

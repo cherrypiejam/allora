@@ -22,7 +22,7 @@ impl Container {
         ct_ref
             .as_ptr()
             .write(Container {
-                slots: Vec::new_in(ct_ref.map_meta(|m| m.alloc.clone()).unwrap())
+                slots: Vec::new_in(ct_ref.meta().alloc.clone())
             });
 
         ct_ref

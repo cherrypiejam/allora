@@ -11,12 +11,11 @@ pub struct Label {
 impl Label {
     pub unsafe fn create(pg: usize, input: &str) -> KObjectRef<Label> {
         let lb_ref = kobject_create!(Label, pg);
-
-        lb_ref.map_meta(|lb_meta| {
-            lb_ref.as_ptr().write(Label {
-                inner: Buckle::parse_in(input, lb_meta.alloc.clone()).unwrap(),
+        lb_ref
+            .as_ptr()
+            .write(Label {
+                inner: Buckle::parse_in(input, lb_ref.meta().alloc.clone()).unwrap(),
             });
-        });
 
         lb_ref
     }
@@ -27,20 +26,7 @@ impl Label {
     // TODO: add these methods when needed
 
     pub fn can_flow_to(&self, rhs: &Self) -> bool {
-        // crate::debug!("inner can flow to");
-
-        // let ax = Buckle::parse("gongqi,gongqi").unwrap();
-        // let bx = Buckle::parse("gongqi,gongqi").unwrap();
-        // assert!(ax.can_flow_to(&bx));
-
-        // let buf = [0x0usize; 4000];
-
-        // crate::debug!("1. inner {:#?} ", self.inner);
-        // crate::debug!("2. inner {:#?} ", rhs.inner);
-
-        let a = self.inner.can_flow_to(&rhs.inner);
-        // crate::debug!("inner can flow to");
-        a
+        self.inner.can_flow_to(&rhs.inner)
     }
 
     pub fn can_flow_to_with_privilege(&self, rhs: &Self, privilege: &Privilege) -> bool {
