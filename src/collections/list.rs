@@ -141,7 +141,6 @@ impl<T, A: Allocator + Clone> List<T, A> {
     }
 
     pub fn remove_nth(&mut self, nth: usize) -> Option<T> {
-
         let mut cur = unsafe { &mut *self.head.load(Ordering::SeqCst) };
         let mut prev = None;
 
@@ -170,6 +169,35 @@ impl<T, A: Allocator + Clone> List<T, A> {
             }
         } else {
             None
+        }
+    }
+
+    pub fn remove<F>(&mut self, f: F) -> Option<T>
+    where
+        F: Fn(&T) -> bool,
+    {
+        let mut cur = unsafe { &mut *self.head.load(Ordering::SeqCst) };
+        loop {
+            if let Some(next) = unsafe { cur.next.load(Ordering::SeqCst).as_mut() } {
+                let prev = cur;
+                cur = next;
+
+                if f(&cur.elem) {
+                    let new = cur.next.load(Ordering::SeqCst);
+                    if let Ok(_) =
+                        prev.next
+                            .compare_exchange(cur, new, Ordering::SeqCst, Ordering::SeqCst)
+                    {
+                        break Some(unsafe {
+                            Box::from_raw_in(cur, self.alloc.clone()).elem
+                        })
+                    } else {
+                        break None
+                    }
+                }
+            } else {
+                break None
+            }
         }
     }
 
@@ -206,52 +234,6 @@ impl<T, A: Allocator + Clone> List<T, A> {
 
 }
 
-// impl<T: PartialEq, A: Allocator + Clone> List<T, A> {
-    // pub fn remove(&mut self, elem: T) -> bool {
-        // let mut cur = self.head.load(Ordering::Acquire);
-        // let mut prev = cur;
-        // while !cur.is_null() {
-            // unsafe {
-                // if (*cur).elem == elem {
-                    // break
-                // } else {
-                    // prev = cur;
-                    // cur = Self::next(cur);
-                // }
-            // }
-        // }
-        // let node = unsafe { &mut *cur };
-
-        // if node
-            // .removed
-            // .compare_exchange(false, true, Ordering::Release, Ordering::Relaxed)
-            // .is_ok()
-        // {
-            // let next = node.next.load(Ordering::Acquire);
-            // unsafe { (*prev).next.store(next, Ordering::Release); }
-
-            // drop(unsafe {
-                // Box::from_raw_in(cur, self.alloc.clone()) // GC
-            // });
-
-            // true
-        // } else {
-            // false
-        // }
-    // }
-
-    // unsafe fn next(node: *mut Node<T>) -> *mut Node<T> {
-        // let mut cur = (*node).next.load(Ordering::Relaxed);
-        // while !cur.is_null() {
-            // if !(*cur).removed.load(Ordering::Relaxed) {
-                // break
-            // } else {
-                // cur = (*cur).next.load(Ordering::Relaxed);
-            // }
-        // }
-        // cur
-    // }
-// }
 
 impl<T, A: Allocator + Clone> IntoIterator for List<T, A> {
     type Item = T;
@@ -324,5 +306,23 @@ mod tests {
         items.iter().for_each(|&i| assert_eq!(list.pop(), Some(i)));
         assert_eq!(list.pop(), None);
         assert_eq!(list.len(), 0);
+    }
+
+
+    #[test_case]
+    fn test_collection_list_more() {
+        let mut list = List::<usize>::new();
+        let items = [0, 1, 2, 3, 4, 5];
+        items.iter().rev().for_each(|&i| list.push(i));
+        list.iter().enumerate().for_each(|(i, e)| {
+            assert_eq!(i, *e as usize);
+        });
+
+        assert_eq!(list.remove(|&e| e == 1), Some(1));
+        assert_eq!(list.remove(|&e| e == 5), Some(5));
+        assert_eq!(list.remove(|&e| e == 8), None);
+        assert_eq!(list.remove(|&e| e == 0), Some(0));
+        assert_eq!(list.remove(|&e| e == 0), None);
+        assert_eq!(list.len(), items.len() - 3);
     }
 }
