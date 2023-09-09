@@ -22,6 +22,28 @@ impl<T> Node<T> {
         let elem = MaybeUninit::<T>::zeroed().assume_init();
         Self::new(elem)
     }
+
+    fn next<'a>(&self) -> Option<&'a Node<T>> {
+        let mut next = self.next.load(Ordering::SeqCst);
+        unsafe {
+            while !next.is_null()
+                && (*next).removed.load(Ordering::SeqCst) {
+                next = (*next).next.load(Ordering::SeqCst);
+            }
+            next.as_ref()
+        }
+    }
+
+    fn next_mut<'a>(&mut self) -> Option<&'a mut Node<T>> {
+        let mut next = self.next.load(Ordering::SeqCst);
+        unsafe {
+            while !next.is_null()
+                && (*next).removed.load(Ordering::SeqCst) {
+                next = (*next).next.load(Ordering::SeqCst);
+            }
+            next.as_mut()
+        }
+    }
 }
 
 impl<T> Drop for Node<T> {
@@ -40,29 +62,29 @@ impl<T> List<T> {
         Self::new_in(Global)
     }
 
-    unsafe fn first(&self) -> Option<&T> {
-        self.head.load(Ordering::SeqCst)
-            .as_ref()
-            .and_then(|n| {
-                n.next.load(Ordering::SeqCst)
-                    .as_ref()
-                    .map(|n| &n.elem)
-            })
-    }
+    // unsafe fn first(&self) -> Option<&T> {
+        // self.head.load(Ordering::SeqCst)
+            // .as_ref()
+            // .and_then(|n| {
+                // n.next.load(Ordering::SeqCst)
+                    // .as_ref()
+                    // .map(|n| &n.elem)
+            // })
+    // }
 
-    unsafe fn second(&self) -> Option<&T> {
-        self.head.load(Ordering::SeqCst)
-            .as_ref()
-            .and_then(|n| {
-                n.next.load(Ordering::SeqCst)
-                    .as_ref()
-                    .and_then(|n| {
-                        n.next.load(Ordering::SeqCst)
-                            .as_ref()
-                            .map(|n| &n.elem)
-                    })
-            })
-    }
+    // unsafe fn second(&self) -> Option<&T> {
+        // self.head.load(Ordering::SeqCst)
+            // .as_ref()
+            // .and_then(|n| {
+                // n.next.load(Ordering::SeqCst)
+                    // .as_ref()
+                    // .and_then(|n| {
+                        // n.next.load(Ordering::SeqCst)
+                            // .as_ref()
+                            // .map(|n| &n.elem)
+                    // })
+            // })
+    // }
 }
 
 impl<T, A: Allocator + Clone> List<T, A> {
@@ -74,22 +96,84 @@ impl<T, A: Allocator + Clone> List<T, A> {
         List { head: AtomicPtr::new(dummy), alloc }
     }
 
-    pub fn insert(&mut self, elem: T) {
+    pub fn push(&mut self, elem: T) {
         let node = Box::into_raw(Box::new_in(Node::new(elem), self.alloc.clone()));
         unsafe {
-            while !self.try_insert(node) {}
+            // blocks only when multiple writers
+            while let Err(_) = self.try_push(node) {}
         }
     }
 
-    unsafe fn try_insert(&mut self, new: *mut Node<T>) -> bool {
-        let head = &*self.head.load(Ordering::Acquire);
-        let old = head.next.load(Ordering::Relaxed);
+    unsafe fn try_push(&mut self, new: *mut Node<T>) -> Result<(), ()> {
+        let head = self.head.load(Ordering::Acquire).as_ref().ok_or(())?;
+        let old = head.next.load(Ordering::Relaxed).as_mut().ok_or(())?;
         (*new).next.store(old, Ordering::Relaxed);
 
         head.next
             .compare_exchange(old, new, Ordering::Release, Ordering::Relaxed)
-            .is_ok()
+            .map(|_| ())
+            .map_err(|_| ())
     }
+
+    // TODO: pop is remove first
+    // pub fn pop(&mut self) -> Option<T> {
+        // unsafe {
+            // loop {
+                // if let Ok(node) = self.try_pop() {
+                    // let node = Box::from_raw_in(raw, alloc)
+                // }
+            // }
+        // }
+    // }
+
+    // unsafe fn try_pop(&mut self) -> Option<*mut Node<T>> {
+        // let head = self.head.load(Ordering::Acquire).as_ref()?;
+        // let old = head.next_mut()?;
+        // let new = old.next_mut()?;
+
+        // head.next
+            // .compare_exchange(old, new, Ordering::Release, Ordering::Relaxed)
+            // .map(|_| new as *mut _)
+            // .ok()
+    // }
+
+    fn remove_nth(&mut self, nth: usize) -> bool {
+
+        let mut cur = unsafe { &*self.head.load(Ordering::Acquire) };
+        let mut prev = None;
+
+        for _ in 0..nth {
+            if let Some(next) = cur.next() {
+                prev = Some(cur);
+                cur = next;
+            } else {
+                return false
+            }
+        }
+
+        false
+
+        // if let Ok(_) =
+            // cur
+            // .removed
+            // .compare_exchange(false, true, Ordering::Release, Ordering::Relaxed)
+        // {
+
+            // let next = cur.next();
+
+            // let next = node.next.load(Ordering::Acquire);
+            // unsafe { (*prev).next.store(next, Ordering::Release); }
+
+            // drop(unsafe {
+                // Box::from_raw_in(cur, self.alloc.clone()) // GC
+            // });
+
+            // true
+        // } else {
+            // false
+        // }
+    }
+
 
     pub fn iter(&self) -> Iter<'_, T> {
         Iter(unsafe {
@@ -125,7 +209,7 @@ impl<T, A: Allocator + Clone> List<T, A> {
 }
 
 impl<T: PartialEq, A: Allocator + Clone> List<T, A> {
-    pub fn delete(&mut self, elem: T) -> bool {
+    pub fn remove(&mut self, elem: T) -> bool {
         let mut cur = self.head.load(Ordering::Acquire);
         let mut prev = cur;
         while !cur.is_null() {
@@ -147,7 +231,11 @@ impl<T: PartialEq, A: Allocator + Clone> List<T, A> {
         {
             let next = node.next.load(Ordering::Acquire);
             unsafe { (*prev).next.store(next, Ordering::Release); }
-            // TODO: GC node
+
+            drop(unsafe {
+                Box::from_raw_in(cur, self.alloc.clone()) // GC
+            });
+
             true
         } else {
             false
@@ -196,14 +284,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         self.0
             .map(|node| {
-                let mut next = node.next.load(Ordering::SeqCst);
-                unsafe {
-                    while !next.is_null()
-                        && (*next).removed.load(Ordering::SeqCst) {
-                        next = (*next).next.load(Ordering::SeqCst);
-                    }
-                    self.0 = next.as_ref();
-                }
+                self.0 = node.next();
                 &node.elem
             })
     }
@@ -218,14 +299,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
         self.0
             .take()
             .map(|node| {
-                let mut next = node.next.load(Ordering::SeqCst);
-                unsafe {
-                    while !next.is_null()
-                        && (*next).removed.load(Ordering::SeqCst) {
-                        next = (*next).next.load(Ordering::SeqCst);
-                    }
-                    self.0 = next.as_mut();
-                }
+                self.0 = node.next_mut();
                 &mut node.elem
             })
     }
@@ -241,7 +315,7 @@ mod tests {
     fn test_collection_list() {
         let mut list = List::<i32>::new();
         let items = [0, 1, 2, 3, 4, 5];
-        items.iter().rev().for_each(|&i| { list.insert(i) });
+        items.iter().rev().for_each(|&i| { list.push(i) });
         list.iter().enumerate().for_each(|(i, e)| {
             assert_eq!(i, *e as usize);
         });
