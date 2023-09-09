@@ -10,12 +10,11 @@ use alloc::boxed::Box;
 struct Node<T> {
     elem: T,
     next: AtomicPtr<Node<T>>,
-    removed: AtomicBool,
 }
 
 impl<T> Node<T> {
     fn new(elem: T) -> Self {
-        Node { elem, next: AtomicPtr::new(ptr::null_mut()), removed: AtomicBool::new(false) }
+        Node { elem, next: AtomicPtr::new(ptr::null_mut()) }
     }
 
     unsafe fn zeroed() -> Self {
@@ -23,34 +22,34 @@ impl<T> Node<T> {
         Self::new(elem)
     }
 
-    fn next<'a>(&self) -> Option<&'a Node<T>> {
-        let mut next = self.next.load(Ordering::SeqCst);
-        unsafe {
-            while !next.is_null()
-                && (*next).removed.load(Ordering::SeqCst) {
-                next = (*next).next.load(Ordering::SeqCst);
-            }
-            next.as_ref()
-        }
-    }
+    // fn next<'a>(&self) -> Option<&'a Node<T>> {
+        // let mut next = self.next.load(Ordering::SeqCst);
+        // unsafe {
+            // while !next.is_null()
+                // && (*next).removed.load(Ordering::SeqCst) {
+                // next = (*next).next.load(Ordering::SeqCst);
+            // }
+            // next.as_ref()
+        // }
+    // }
 
-    fn next_mut<'a>(&mut self) -> Option<&'a mut Node<T>> {
-        let mut next = self.next.load(Ordering::SeqCst);
-        unsafe {
-            while !next.is_null()
-                && (*next).removed.load(Ordering::SeqCst) {
-                next = (*next).next.load(Ordering::SeqCst);
-            }
-            next.as_mut()
-        }
-    }
+    // fn next_mut<'a>(&mut self) -> Option<&'a mut Node<T>> {
+        // let mut next = self.next.load(Ordering::SeqCst);
+        // unsafe {
+            // while !next.is_null()
+                // && (*next).removed.load(Ordering::SeqCst) {
+                // next = (*next).next.load(Ordering::SeqCst);
+            // }
+            // next.as_mut()
+        // }
+    // }
 }
 
-impl<T> Drop for Node<T> {
-    fn drop(&mut self) {
-        crate::debug!("Node gets dropped! ")
-    }
-}
+// impl<T> Drop for Node<T> {
+    // fn drop(&mut self) {
+        // crate::debug!("Node gets dropped! ")
+    // }
+// }
 
 struct List<T, A: Allocator + Clone = Global> {
     head: AtomicPtr<Node<T>>,
@@ -105,12 +104,12 @@ impl<T, A: Allocator + Clone> List<T, A> {
     }
 
     unsafe fn try_push(&mut self, new: *mut Node<T>) -> Result<(), ()> {
-        let head = self.head.load(Ordering::Acquire).as_ref().ok_or(())?;
-        let old = head.next.load(Ordering::Relaxed).as_mut().ok_or(())?;
-        (*new).next.store(old, Ordering::Relaxed);
+        let head = self.head.load(Ordering::SeqCst).as_ref().ok_or(())?;
+        let old = head.next.load(Ordering::SeqCst);
+        (*new).next.store(old, Ordering::SeqCst);
 
         head.next
-            .compare_exchange(old, new, Ordering::Release, Ordering::Relaxed)
+            .compare_exchange(old, new, Ordering::SeqCst, Ordering::SeqCst)
             .map(|_| ())
             .map_err(|_| ())
     }
@@ -137,43 +136,42 @@ impl<T, A: Allocator + Clone> List<T, A> {
             // .ok()
     // }
 
-    fn remove_nth(&mut self, nth: usize) -> bool {
+    pub fn pop(&mut self) -> Option<T> {
+        self.remove_nth(1)
+    }
 
-        let mut cur = unsafe { &*self.head.load(Ordering::Acquire) };
+    pub fn remove_nth(&mut self, nth: usize) -> Option<T> {
+
+        let mut cur = unsafe { &mut *self.head.load(Ordering::SeqCst) };
         let mut prev = None;
 
         for _ in 0..nth {
-            if let Some(next) = cur.next() {
+            if let Some(next) = unsafe {
+                cur.next.load(Ordering::SeqCst).as_mut()
+            } {
                 prev = Some(cur);
                 cur = next;
             } else {
-                return false
+                return None
             }
         }
 
-        false
-
-        // if let Ok(_) =
-            // cur
-            // .removed
-            // .compare_exchange(false, true, Ordering::Release, Ordering::Relaxed)
-        // {
-
-            // let next = cur.next();
-
-            // let next = node.next.load(Ordering::Acquire);
-            // unsafe { (*prev).next.store(next, Ordering::Release); }
-
-            // drop(unsafe {
-                // Box::from_raw_in(cur, self.alloc.clone()) // GC
-            // });
-
-            // true
-        // } else {
-            // false
-        // }
+        if let Some(prev) = prev {
+            let new = cur.next.load(Ordering::SeqCst);
+            if let Ok(_) =
+                prev.next
+                    .compare_exchange(cur, new, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Some(unsafe {
+                    Box::from_raw_in(cur, self.alloc.clone()).elem
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
-
 
     pub fn iter(&self) -> Iter<'_, T> {
         Iter(unsafe {
@@ -208,52 +206,52 @@ impl<T, A: Allocator + Clone> List<T, A> {
 
 }
 
-impl<T: PartialEq, A: Allocator + Clone> List<T, A> {
-    pub fn remove(&mut self, elem: T) -> bool {
-        let mut cur = self.head.load(Ordering::Acquire);
-        let mut prev = cur;
-        while !cur.is_null() {
-            unsafe {
-                if (*cur).elem == elem {
-                    break
-                } else {
-                    prev = cur;
-                    cur = Self::next(cur);
-                }
-            }
-        }
-        let node = unsafe { &mut *cur };
+// impl<T: PartialEq, A: Allocator + Clone> List<T, A> {
+    // pub fn remove(&mut self, elem: T) -> bool {
+        // let mut cur = self.head.load(Ordering::Acquire);
+        // let mut prev = cur;
+        // while !cur.is_null() {
+            // unsafe {
+                // if (*cur).elem == elem {
+                    // break
+                // } else {
+                    // prev = cur;
+                    // cur = Self::next(cur);
+                // }
+            // }
+        // }
+        // let node = unsafe { &mut *cur };
 
-        if node
-            .removed
-            .compare_exchange(false, true, Ordering::Release, Ordering::Relaxed)
-            .is_ok()
-        {
-            let next = node.next.load(Ordering::Acquire);
-            unsafe { (*prev).next.store(next, Ordering::Release); }
+        // if node
+            // .removed
+            // .compare_exchange(false, true, Ordering::Release, Ordering::Relaxed)
+            // .is_ok()
+        // {
+            // let next = node.next.load(Ordering::Acquire);
+            // unsafe { (*prev).next.store(next, Ordering::Release); }
 
-            drop(unsafe {
-                Box::from_raw_in(cur, self.alloc.clone()) // GC
-            });
+            // drop(unsafe {
+                // Box::from_raw_in(cur, self.alloc.clone()) // GC
+            // });
 
-            true
-        } else {
-            false
-        }
-    }
+            // true
+        // } else {
+            // false
+        // }
+    // }
 
-    unsafe fn next(node: *mut Node<T>) -> *mut Node<T> {
-        let mut cur = (*node).next.load(Ordering::Relaxed);
-        while !cur.is_null() {
-            if !(*cur).removed.load(Ordering::Relaxed) {
-                break
-            } else {
-                cur = (*cur).next.load(Ordering::Relaxed);
-            }
-        }
-        cur
-    }
-}
+    // unsafe fn next(node: *mut Node<T>) -> *mut Node<T> {
+        // let mut cur = (*node).next.load(Ordering::Relaxed);
+        // while !cur.is_null() {
+            // if !(*cur).removed.load(Ordering::Relaxed) {
+                // break
+            // } else {
+                // cur = (*cur).next.load(Ordering::Relaxed);
+            // }
+        // }
+        // cur
+    // }
+// }
 
 impl<T, A: Allocator + Clone> IntoIterator for List<T, A> {
     type Item = T;
@@ -284,7 +282,9 @@ impl<'a, T> Iterator for Iter<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         self.0
             .map(|node| {
-                self.0 = node.next();
+                self.0 = unsafe {
+                    node.next.load(Ordering::SeqCst).as_ref()
+                };
                 &node.elem
             })
     }
@@ -299,7 +299,9 @@ impl<'a, T> Iterator for IterMut<'a, T> {
         self.0
             .take()
             .map(|node| {
-                self.0 = node.next_mut();
+                self.0 = unsafe {
+                    node.next.load(Ordering::SeqCst).as_mut()
+                };
                 &mut node.elem
             })
     }
@@ -313,12 +315,14 @@ mod tests {
 
     #[test_case]
     fn test_collection_list() {
-        let mut list = List::<i32>::new();
+        let mut list = List::<usize>::new();
         let items = [0, 1, 2, 3, 4, 5];
-        items.iter().rev().for_each(|&i| { list.push(i) });
+        items.iter().rev().for_each(|&i| list.push(i));
         list.iter().enumerate().for_each(|(i, e)| {
             assert_eq!(i, *e as usize);
         });
-        assert_eq!(items.len(), list.len());
+        items.iter().for_each(|&i| assert_eq!(list.pop(), Some(i)));
+        assert_eq!(list.pop(), None);
+        assert_eq!(list.len(), 0);
     }
 }
