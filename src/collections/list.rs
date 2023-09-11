@@ -1,10 +1,9 @@
 use core::ptr;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicPtr, Ordering};
 use core::mem::MaybeUninit;
 use core::alloc::Allocator;
 
 use alloc::alloc::Global;
-use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 
 struct Node<T> {
@@ -21,37 +20,9 @@ impl<T> Node<T> {
         let elem = MaybeUninit::<T>::zeroed().assume_init();
         Self::new(elem)
     }
-
-    // fn next<'a>(&self) -> Option<&'a Node<T>> {
-        // let mut next = self.next.load(Ordering::SeqCst);
-        // unsafe {
-            // while !next.is_null()
-                // && (*next).removed.load(Ordering::SeqCst) {
-                // next = (*next).next.load(Ordering::SeqCst);
-            // }
-            // next.as_ref()
-        // }
-    // }
-
-    // fn next_mut<'a>(&mut self) -> Option<&'a mut Node<T>> {
-        // let mut next = self.next.load(Ordering::SeqCst);
-        // unsafe {
-            // while !next.is_null()
-                // && (*next).removed.load(Ordering::SeqCst) {
-                // next = (*next).next.load(Ordering::SeqCst);
-            // }
-            // next.as_mut()
-        // }
-    // }
 }
 
-// impl<T> Drop for Node<T> {
-    // fn drop(&mut self) {
-        // crate::debug!("Node gets dropped! ")
-    // }
-// }
-
-struct List<T, A: Allocator + Clone = Global> {
+pub struct List<T, A: Allocator + Clone = Global> {
     head: AtomicPtr<Node<T>>,
     alloc: A,
 }
@@ -60,30 +31,6 @@ impl<T> List<T> {
     pub fn new() -> List<T> {
         Self::new_in(Global)
     }
-
-    // unsafe fn first(&self) -> Option<&T> {
-        // self.head.load(Ordering::SeqCst)
-            // .as_ref()
-            // .and_then(|n| {
-                // n.next.load(Ordering::SeqCst)
-                    // .as_ref()
-                    // .map(|n| &n.elem)
-            // })
-    // }
-
-    // unsafe fn second(&self) -> Option<&T> {
-        // self.head.load(Ordering::SeqCst)
-            // .as_ref()
-            // .and_then(|n| {
-                // n.next.load(Ordering::SeqCst)
-                    // .as_ref()
-                    // .and_then(|n| {
-                        // n.next.load(Ordering::SeqCst)
-                            // .as_ref()
-                            // .map(|n| &n.elem)
-                    // })
-            // })
-    // }
 }
 
 impl<T, A: Allocator + Clone> List<T, A> {
@@ -113,28 +60,6 @@ impl<T, A: Allocator + Clone> List<T, A> {
             .map(|_| ())
             .map_err(|_| ())
     }
-
-    // TODO: pop is remove first
-    // pub fn pop(&mut self) -> Option<T> {
-        // unsafe {
-            // loop {
-                // if let Ok(node) = self.try_pop() {
-                    // let node = Box::from_raw_in(raw, alloc)
-                // }
-            // }
-        // }
-    // }
-
-    // unsafe fn try_pop(&mut self) -> Option<*mut Node<T>> {
-        // let head = self.head.load(Ordering::Acquire).as_ref()?;
-        // let old = head.next_mut()?;
-        // let new = old.next_mut()?;
-
-        // head.next
-            // .compare_exchange(old, new, Ordering::Release, Ordering::Relaxed)
-            // .map(|_| new as *mut _)
-            // .ok()
-    // }
 
     pub fn pop(&mut self) -> Option<T> {
         self.remove_nth(1)
@@ -245,7 +170,7 @@ impl<T, A: Allocator + Clone> IntoIterator for List<T, A> {
     }
 }
 
-struct IntoIter<T, A: Allocator + Clone = Global>(List<T, A>);
+pub struct IntoIter<T, A: Allocator + Clone = Global>(List<T, A>);
 
 impl<T, A: Allocator + Clone> Iterator for IntoIter<T, A> {
     type Item = T;
@@ -256,7 +181,7 @@ impl<T, A: Allocator + Clone> Iterator for IntoIter<T, A> {
 }
 
 
-struct Iter<'a, T>(Option<&'a Node<T>>);
+pub struct Iter<'a, T>(Option<&'a Node<T>>);
 
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
@@ -272,7 +197,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 }
 
-struct IterMut<'a, T>(Option<&'a mut Node<T>>);
+pub struct IterMut<'a, T>(Option<&'a mut Node<T>>);
 
 impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
