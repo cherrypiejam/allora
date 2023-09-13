@@ -1,7 +1,7 @@
 use core::arch::asm;
 
 use crate::kobject::{Container, Thread, Label, ThreadRef, THREAD_NPAGES, KOBJ_NPAGES};
-use crate::schedule::{schedule, schedule_rbs, schedule_thread};
+use crate::schedule::{schedule_by_resource_blocks, schedule_thread};
 use crate::exception::with_intr_disabled;
 use crate::kobject::KObjectRef;
 use crate::cpu_idle;
@@ -41,7 +41,7 @@ pub fn spawn_raw<F: FnOnce() + 'static>(ct_ref: KObjectRef<Container>, label: &s
     let th_slot = ct_ref.as_mut().get_slot().unwrap();
     let th_page_id = ct_ref.meta_mut().free_pages.get_multiple(THREAD_NPAGES).unwrap();
     let th_ref = unsafe {
-        Thread::create(th_page_id, move || { f(); cpu_idle(); })
+        Thread::create(th_page_id, move || { f(); cpu_idle!(); })
     };
     th_ref.meta_mut().parent = Some(ct_ref);
     th_ref.meta_mut().label = Some(lb_ref);
@@ -54,7 +54,7 @@ pub fn spawn_raw<F: FnOnce() + 'static>(ct_ref: KObjectRef<Container>, label: &s
 pub fn yield_to_next() {
     with_intr_disabled(|| {
         // schedule();
-        schedule_rbs();
+        schedule_by_resource_blocks();
     })
 }
 

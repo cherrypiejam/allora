@@ -3,10 +3,26 @@ use alloc::vec::Vec;
 use super::{KObjectRef, KObjectArena, KObjectPtr};
 use super::{kobject_create, INVALID_KOBJ_ID};
 use super::Label;
+use super::Thread;
+use super::ThreadRef;
+
+use crate::collections::list::List;
+
+#[derive(Clone)]
+pub enum TimeSlice {
+    Routine,
+    Execute(ThreadRef),
+    Redirect(KObjectRef<Container>),
+}
 
 pub struct Container {
     pub slots: Vec<KObjectPtr, KObjectArena>,
+    pub scheduler: Option<KObjectRef<Thread>>,
+    pub known_containers: Option<List<KObjectRef<Container>, KObjectArena>>,
+    pub time_slices: Option<Vec<TimeSlice, KObjectArena>>,
 }
+
+unsafe impl Send for Container {}
 
 impl Drop for Container {
     fn drop(&mut self) {
@@ -22,7 +38,10 @@ impl Container {
         ct_ref
             .as_ptr()
             .write(Container {
-                slots: Vec::new_in(ct_ref.meta().alloc.clone())
+                slots: Vec::new_in(ct_ref.meta().alloc.clone()),
+                scheduler: None,
+                known_containers: None,
+                time_slices: None,
             });
 
         ct_ref

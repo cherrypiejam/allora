@@ -45,8 +45,6 @@ use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
 // use core::time::Duration;
 
-// use mm::arena;
-// use mm::page_tree;
 use mm::PAGE_SIZE;
 
 
@@ -129,11 +127,15 @@ static READY_LIST: mutex::Mutex<Option<VecDeque<kobject::ThreadRef>>> = mutex::M
 // }
 
 struct ResourceBlock {
-    time_slices: kobject::KObjectRef<kobject::TimeSlices>,
+    pub holder: kobject::KObjectRef<kobject::Container>,
+    pub time_quota: usize,
+    // pub next_slice: usize,
+    // memory quotas, time quotas, disk, network ...
 }
+
 static RESBLOCKS: mutex::Mutex<Option<(Vec<ResourceBlock>, usize)>> = mutex::Mutex::new(None);
 
-static TS: mutex::Mutex<Option<Vec<(kobject::KObjectRef<kobject::TimeSlices>, usize)>>> = mutex::Mutex::new(None);
+static TS: mutex::Mutex<Option<Vec<(kobject::KObjectRef<kobject::Container>, usize)>>> = mutex::Mutex::new(None);
 
 
 static UART: mutex::Mutex<Option<uart::UART>> = mutex::Mutex::new(None);
@@ -325,6 +327,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     };
 
     root_ct_ref.as_mut().set_slot(th_slot, main_th_ref);
+    root_ct_ref.as_mut().scheduler = Some(main_th_ref);
 
     debug!("Main thread initialized");
 
@@ -334,6 +337,12 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     // Create a pool container
     let ct_ref = container::create(root_ct_ref, "gongqi,gongqi");
+    if let Some(cts) = root_ct_ref.as_mut().known_containers.as_mut() {
+        cts.push(ct_ref)
+    } else {
+        let alloc = root_ct_ref.meta().alloc.clone();
+        root_ct_ref.as_mut().known_containers = Some(collections::list::List::new_in(alloc));
+    }
     container::move_npages(root_ct_ref, ct_ref, 300);
 
     // create a lf channel
@@ -345,16 +354,13 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         "gongqi,gongqi",
         move || {
             let rx = lfchannel::WrapperReceiver::new(rx);
-            let alloc = unsafe {
-                KObjectRef::<Thread>::new(
-                    thread::current_thread()
-                    .map(|t| mm::pgid!(t as *const kobject::Thread as usize))
-                    .unwrap()
-                )
+            // container.receivers.append(rx) // push receivers into pool
+
+            let alloc = thread::current_thread_koref()
+                .unwrap()
                 .meta()
                 .alloc
-                .clone()
-            };
+                .clone();
 
             let mut ready_list = Vec::<kobject::ThreadRef, _>::new_in(alloc.clone());
             let mut hand = 0;
@@ -386,29 +392,31 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
             }
         }
     );
+    ct_ref.as_mut().scheduler = Some(scheduler.0); // root cannot modify ct_ref, this is done on
+                                                   // create
 
     // Send "tasks"
     (0..0).for_each(|_| tx.send(()));
 
 
-    // Create a TS object
-    let ts_slot = ct_ref.as_mut().get_slot().unwrap();
-    let ts_page_id = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
-    let ts_ref = unsafe { kobject::TimeSlices::create(ts_page_id) };
-    ts_ref.meta_mut().parent = Some(ct_ref);
-    ct_ref.as_mut().set_slot(ts_slot, ts_ref);
+    // // Create a TS object
+    // let ts_slot = ct_ref.as_mut().get_slot().unwrap();
+    // let ts_page_id = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
+    // let ts_ref = unsafe { kobject::TimeSlices::create(ts_page_id) };
+    // ts_ref.meta_mut().parent = Some(ct_ref);
+    // ct_ref.as_mut().set_slot(ts_slot, ts_ref);
 
-    TS.map(|ts| ts.push((ts_ref, 0)));
+    // TS.map(|ts| ts.push((ts_ref, 0)));
 
 
-    // Create another TS object, another label
-    let ts_slot = ct_ref.as_mut().get_slot().unwrap();
-    let ts_page_id = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
-    let ts_ref_2 = unsafe { kobject::TimeSlices::create(ts_page_id) };
-    ts_ref_2.meta_mut().parent = Some(ct_ref);
-    ct_ref.as_mut().set_slot(ts_slot, ts_ref_2);
+    // // Create another TS object, another label
+    // let ts_slot = ct_ref.as_mut().get_slot().unwrap();
+    // let ts_page_id = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
+    // let ts_ref_2 = unsafe { kobject::TimeSlices::create(ts_page_id) };
+    // ts_ref_2.meta_mut().parent = Some(ct_ref);
+    // ct_ref.as_mut().set_slot(ts_slot, ts_ref_2);
 
-    TS.map(|ts| ts.push((ts_ref_2, 0)));
+    // TS.map(|ts| ts.push((ts_ref_2, 0)));
 
 
     // problem:
@@ -421,99 +429,111 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
     let (slice_tx, slice_rx) = lfchannel::channel::<()>();
 
-    let some_scheduler = thread::spawn_raw(ct_ref, "gongqi,gongqi", move || {
-        for _ in 0..2 {
-            debug!("idle once in some scheduler");
-            exception::with_intr_disabled(|| utils::wfi());
-        }
+    // let some_scheduler = thread::spawn_raw(ct_ref, "gongqi,gongqi", move || {
+        // for _ in 0..2 {
+            // debug!("idle once in some scheduler");
+            // exception::with_intr_disabled(|| utils::wfi());
+        // }
 
-        // get its own CPU resources -- time slices
-        // find by label
+        // // get its own CPU resources -- time slices
+        // // find by label
 
-        // modify its time slices
-        ts_ref.as_mut().slices[0] = kobject::TSlice::Slices(ts_ref_2);
+        // // modify its time slices
+        // ts_ref.as_mut().slices[0] = kobject::TSlice::Slices(ts_ref_2);
 
-        // inform the target pool
-        slice_tx.send(()); // making it atomic w/ prev line?
+        // // inform the target pool
+        // slice_tx.send(()); // making it atomic w/ prev line?
 
-        cpu_idle_debug("idling in some scheduler")
-    });
+        // cpu_idle_debug("idling in some scheduler")
+    // });
 
     exception::with_intr_disabled(move || {
 
-        use kobject::TSlice;
+        use kobject::TimeSlice;
+
+        let default_time_quota = 2;
 
         let rb = ResourceBlock {
-            time_slices: ts_ref,
+            holder: ct_ref,
+            time_quota: default_time_quota,
         };
 
-        rb.time_slices.as_mut().push(TSlice::Thread(some_scheduler));
-        // rb.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
+        // init time slices if none
+        if ct_ref.as_mut().time_slices.is_none() {
+            let alloc = ct_ref.meta().alloc.clone();
+            ct_ref.as_mut().time_slices = Some(Vec::new_in(alloc))
+        }
+
+        if let Some(slices) = ct_ref.as_mut().time_slices.as_mut() {
+            (0..rb.time_quota).for_each(|_| {
+                slices.push(TimeSlice::Routine) // this modifies ct_ref, must be an async operation
+                                             // otherwise leaks (?)
+                                             // To fix it, how to bootstrap this? 2 ways
+                                             // 1. every rb belongs the root ct, the root ct
+                                             //     add slices to itself, redirect some to target
+                                             //     ct, the target ct's scheduler runs and reads
+                                             //     updates from the lf channel
+                                             // 2. ???
+            });
+        } else {
+            panic!("WTF");
+        }
+
+        TS.map(|ts| ts.push((ct_ref, 0)));
+
+        // // rb.time_slices.as_mut().push(TSlice::Thread(some_scheduler));
+        // rb.time_slices.as_mut().push(TSlice::Thread(
+            // kobject::ThreadRef(ct_ref.as_ref().scheduler.unwrap())
+        // ));
+
+        // let rb2 = ResourceBlock {
+            // time_slices: ts_ref_2,
+        // };
+        // // rb2.time_slices.as_mut().push(TSlice::Slices(ts_ref));
+        // rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
             // ct_ref,
             // "gongqi,gongqi",
-            // || cpu_idle_debug("CPU idling"),
+            // || cpu_idle_debug("CPU idling in RB 2"),
         // )));
 
-        let rb2 = ResourceBlock {
-            time_slices: ts_ref_2,
-        };
-        // rb2.time_slices.as_mut().push(TSlice::Slices(ts_ref));
-        rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
-            ct_ref,
-            "gongqi,gongqi",
-            || cpu_idle_debug("CPU idling in RB 2"),
-        )));
+        // rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
+            // ct_ref,
+            // "gongqi,gongqi",
+            // move || {
+                // let slice_rx = lfchannel::WrapperReceiver::new(slice_rx);
+                // let alloc = thread::current_thread_koref()
+                    // .unwrap()
+                    // .meta()
+                    // .alloc
+                    // .clone();
+                // loop {
+                    // if let Some(slices) = slice_rx.recv_in(alloc.clone()) {
+                        // for _ in slices {
+                            // ts_ref_2.as_mut().push(TSlice::None)
+                        // }
+                    // }
 
-        rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
-            ct_ref,
-            "gongqi,gongqi",
-            move || {
-                let slice_rx = lfchannel::WrapperReceiver::new(slice_rx);
-                loop {
-                    // TODO: use local allocator
-                    if let Some(slices) = slice_rx.recv() {
-                        for _ in slices {
-                            ts_ref_2.as_mut().push(TSlice::None)
-                        }
-                    }
+                    // debug!("something");
+                    // exception::with_intr_disabled(|| utils::wfi());
+                // }
+            // },
+        // )));
 
-                    debug!("something");
-                    exception::with_intr_disabled(|| utils::wfi());
-                }
-            },
-        )));
+        debug!("hhhh");
 
         RESBLOCKS.map(|(rbs, _)| {
             rbs.push(rb);
-            rbs.push(rb2);
+            // rbs.push(rb2);
         });
 
         // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });
     });
 
 
-    cpu_idle();
+    cpu_idle!("idling in main");
 
 }
 
-
-pub fn cpu_idle() -> ! {
-    loop {
-        // ensure CPU waking up first
-        exception::with_intr_disabled(|| {
-            utils::wfi();
-        });
-    }
-}
-
-pub fn cpu_idle_debug(msg: &str) -> ! {
-    loop {
-        debug!("{}", msg);
-        exception::with_intr_disabled(|| {
-            utils::wfi();
-        });
-    }
-}
 
 #[panic_handler]
 fn panic(panic_info: &PanicInfo<'_>) -> ! {
@@ -567,5 +587,24 @@ macro_rules! debug {
 
 pub(crate) use debug;
 
+macro_rules! cpu_idle {
+    () => {
+        loop {
+            use crate::{exception, utils};
+            exception::with_intr_disabled(|| {
+                utils::wfi();
+            });
+        }
+    };
+    ($($arg:tt)*) => {
+        loop {
+            use crate::{debug, exception, utils};
+            debug!($($arg)*);
+            exception::with_intr_disabled(|| {
+                utils::wfi();
+            });
+        }
+    };
+}
 
-
+pub(crate) use cpu_idle;

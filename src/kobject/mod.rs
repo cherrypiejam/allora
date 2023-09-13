@@ -10,6 +10,7 @@ pub use container::Container;
 pub use label::Label;
 pub use thread::{Thread, STACK_SIZE, THREAD_NPAGES};
 pub use time_slices::{TimeSlices, TSlice};
+pub use container::TimeSlice;
 
 use crate::mm::page_tree::PageTree;
 use crate::mm::koarena::KObjectArena;

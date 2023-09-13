@@ -47,3 +47,20 @@ pub fn move_npages(ct_ref_1: KObjectRef<Container>, ct_ref_2: KObjectRef<Contain
 }
 
 pub fn move_time_slices() {}
+
+pub fn search(ct_ref: KObjectRef<Container>, key: usize) -> Option<KObjectRef<Container>> {
+    // label checks
+    // ct_ref can flow to the current label
+
+    let mut cur = ct_ref;
+    // ct_ref.as_ref().known_containers.unwrap().iter().find(|ctref|)
+    // search all from root
+    // find the oldest one
+
+    None
+    // 2 options after getting the target pool
+    // 1. merge to the target pool
+    // 2. let the target pool's scheduling thread to manage two pools
+    //
+    // atomic load VS redirect
+}

@@ -1,50 +1,54 @@
 use crate::kobject::{Thread, ThreadRef, KObjectRef};
-// use crate::switch::switch;
 use crate::thread::current_thread;
 use crate::mm::pgid;
 use crate::READY_LIST;
 use crate::RESBLOCKS;
 use crate::TS;
 use crate::kobject::TimeSlices;
+use crate::kobject::Container;
 
 extern "C" {
     pub fn switch(curr: *mut core::ffi::c_void, next: *mut core::ffi::c_void);
 }
 
-fn find_next_thread(tss_ref: KObjectRef<TimeSlices>) -> Option<ThreadRef> {
-    let tss_hand = TS
+fn find_next_thread(ct_ref: KObjectRef<Container>) -> Option<ThreadRef> {
+    let hand = TS
         .lock()
         .as_mut()
-        .and_then(|tss| {
-            tss.iter_mut()
-                .find(|(t, _)| *t == tss_ref)
-                .and_then(|(t, h)| {
-                    if t.as_ref().slices.is_empty() {
-                        None
+        .and_then(|cts| {
+            cts.iter_mut()
+                .find(|(ct_ref2, _)| *ct_ref2 == ct_ref)
+                .and_then(|(ct_ref2, h)| {
+                    if let Some(slices) = ct_ref2.as_ref().time_slices.as_ref() {
+                        if slices.is_empty() {
+                            None
+                        } else {
+                            let old_h = *h;
+                            *h = (*h + 1) % slices.len();
+                            Some(old_h)
+                        }
                     } else {
-                        let old_h = *h;
-                        *h = (*h + 1) % t.as_ref().slices.len();
-                        Some(old_h)
+                        None
                     }
                 })
         });
 
-    use crate::kobject::TSlice;
-    tss_hand
-        .and_then(|tss_hand| {
-            let ts = &tss_ref.as_ref().slices[tss_hand];
-            match ts {
-                TSlice::None => None,
-                TSlice::Thread(th) => Some(th.clone()),
-                TSlice::Slices(tss) => find_next_thread(tss.clone()),
+    use crate::kobject::TimeSlice as TS;
+    hand.and_then(|h| {
+        if let Some(slices) = ct_ref.as_ref().time_slices.as_ref() {
+            match slices[h] {
+                TS::Routine => ct_ref.as_ref().scheduler.clone().map(|th| ThreadRef(th)),
+                TS::Execute(th) => Some(th.clone()),
+                TS::Redirect(ct_ref) => find_next_thread(ct_ref),
             }
-        })
+        } else {
+            None
+        }
+    })
 }
 
-pub fn schedule_rbs() {
-
+pub fn schedule_by_resource_blocks() {
     if let Some(curr) = current_thread().map(|t| t as *mut Thread) {
-
         let ts = RESBLOCKS
             .lock()
             .as_mut()
@@ -60,7 +64,7 @@ pub fn schedule_rbs() {
                         &mut rbs[old_hand]
                     };
 
-                    find_next_thread(rb.time_slices)
+                    find_next_thread(rb.holder)
                 }
             });
 
@@ -69,9 +73,7 @@ pub fn schedule_rbs() {
                 switch(curr as *mut _, tref.0.as_ptr() as *mut _)
             }
         }
-
     }
-
 }
 
 
