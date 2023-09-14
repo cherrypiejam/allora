@@ -115,17 +115,6 @@ static ALLOCATOR: linked_list_allocator::LockedHeap = linked_list_allocator::Loc
 // LEAK: must be wait-free
 static READY_LIST: mutex::Mutex<Option<VecDeque<kobject::ThreadRef>>> = mutex::Mutex::new(None);
 
-// #[derive(Clone)]
-// enum TimeSlice {
-    // None,
-    // Thread(kobject::ThreadRef),
-// }
-
-// struct VirtTimeSlices {
-    // slices: Vec<TimeSlice>,
-    // hand: usize,
-// }
-
 struct ResourceBlock {
     pub holder: kobject::KObjectRef<kobject::Container>,
     pub time_quota: usize,
@@ -341,9 +330,13 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         cts.push(ct_ref)
     } else {
         let alloc = root_ct_ref.meta().alloc.clone();
-        root_ct_ref.as_mut().known_containers = Some(collections::list::List::new_in(alloc));
+        root_ct_ref.as_mut().known_containers = Some({
+            let mut list = collections::list::List::new_in(alloc);
+            list.push(ct_ref);
+            list
+        });
     }
-    container::move_npages(root_ct_ref, ct_ref, 300);
+    container::move_npages(root_ct_ref, ct_ref, 100);
 
     // create a lf channel
     let (tx, rx) = lfchannel::channel::<()>();
@@ -380,6 +373,13 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
                         });
                 }
 
+                if let Some(ct) = container::search(root_ct_ref, "gongqi,gongqi", ct_ref) {
+                    thread::yield_to(kobject::ThreadRef(
+                        ct.as_ref().scheduler.unwrap()
+                    ))
+                }
+
+
                 if ready_list.is_empty() {
                     utils::wfi();
                 } else {
@@ -395,28 +395,76 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
     ct_ref.as_mut().scheduler = Some(scheduler.0); // root cannot modify ct_ref, this is done on
                                                    // create
 
+    // Create another pool container
+    let ct_ref2 = container::create(root_ct_ref, "gongqi&laptop,gongqi");
+    if let Some(cts) = root_ct_ref.as_mut().known_containers.as_mut() {
+        cts.push(ct_ref2)
+    } else {
+        let alloc = root_ct_ref.meta().alloc.clone();
+        root_ct_ref.as_mut().known_containers = Some({
+            let mut list = collections::list::List::new_in(alloc);
+            list.push(ct_ref2);
+            list
+        });
+    }
+    container::move_npages(root_ct_ref, ct_ref2, 100);
+
+    // create a lf channel
+    let (tx2, rx2) = lfchannel::channel::<()>();
+
+    // create a scheduling thread for the pool
+    let scheduler2 = thread::spawn_raw(
+        ct_ref2,
+        "gongqi,gongqi",
+        move || {
+            let rx = lfchannel::WrapperReceiver::new(rx2);
+            // container.receivers.append(rx) // push receivers into pool
+
+            let alloc = thread::current_thread_koref()
+                .unwrap()
+                .meta()
+                .alloc
+                .clone();
+
+            let mut ready_list = Vec::<kobject::ThreadRef, _>::new_in(alloc.clone());
+            let mut hand = 0;
+
+            loop {
+                // scheduling routine
+                if let Some(tasks) = rx.recv_in(alloc.clone()) {
+                    tasks
+                        .iter()
+                        .enumerate()
+                        .for_each(|(i, _)| {
+                            ready_list.push(thread::spawn_raw(
+                                ct_ref,
+                                "gongqi&laptop,gongqi",
+                                move || { loop { debug!("running task {}", i); } }
+                            ));
+                        });
+                }
+
+                if ready_list.is_empty() {
+                    utils::wfi();
+                } else {
+                    let next = ready_list[hand];
+                    hand = (hand + 1) % ready_list.len();
+                    thread::yield_to(next)
+                }
+
+                debug!("in loop");
+            }
+        }
+    );
+    ct_ref2.as_mut().scheduler = Some(scheduler2.0);
+
+
     // Send "tasks"
     (0..0).for_each(|_| tx.send(()));
 
 
-    // // Create a TS object
-    // let ts_slot = ct_ref.as_mut().get_slot().unwrap();
-    // let ts_page_id = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
-    // let ts_ref = unsafe { kobject::TimeSlices::create(ts_page_id) };
-    // ts_ref.meta_mut().parent = Some(ct_ref);
-    // ct_ref.as_mut().set_slot(ts_slot, ts_ref);
-
-    // TS.map(|ts| ts.push((ts_ref, 0)));
-
-
-    // // Create another TS object, another label
-    // let ts_slot = ct_ref.as_mut().get_slot().unwrap();
-    // let ts_page_id = ct_ref.meta_mut().free_pages.get_multiple(KOBJ_NPAGES).unwrap();
-    // let ts_ref_2 = unsafe { kobject::TimeSlices::create(ts_page_id) };
-    // ts_ref_2.meta_mut().parent = Some(ct_ref);
-    // ct_ref.as_mut().set_slot(ts_slot, ts_ref_2);
-
-    // TS.map(|ts| ts.push((ts_ref_2, 0)));
+    // Send "tasks" to another pool
+    (0..0).for_each(|_| tx2.send(()));
 
 
     // problem:
@@ -453,6 +501,7 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
 
         let default_time_quota = 2;
 
+        // create the first resource block
         let rb = ResourceBlock {
             holder: ct_ref,
             time_quota: default_time_quota,
@@ -480,50 +529,35 @@ pub extern "C" fn kernel_main(dtb: &device_tree::DeviceTree, _start_addr: u64, _
         }
 
         TS.map(|ts| ts.push((ct_ref, 0)));
+        // create the first resource block end
 
-        // // rb.time_slices.as_mut().push(TSlice::Thread(some_scheduler));
-        // rb.time_slices.as_mut().push(TSlice::Thread(
-            // kobject::ThreadRef(ct_ref.as_ref().scheduler.unwrap())
-        // ));
 
-        // let rb2 = ResourceBlock {
-            // time_slices: ts_ref_2,
-        // };
-        // // rb2.time_slices.as_mut().push(TSlice::Slices(ts_ref));
-        // rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
-            // ct_ref,
-            // "gongqi,gongqi",
-            // || cpu_idle_debug("CPU idling in RB 2"),
-        // )));
+        // create another resource block
+        let rb2 = ResourceBlock {
+            holder: ct_ref2,
+            time_quota: default_time_quota,
+        };
 
-        // rb2.time_slices.as_mut().push(TSlice::Thread(thread::spawn_raw(
-            // ct_ref,
-            // "gongqi,gongqi",
-            // move || {
-                // let slice_rx = lfchannel::WrapperReceiver::new(slice_rx);
-                // let alloc = thread::current_thread_koref()
-                    // .unwrap()
-                    // .meta()
-                    // .alloc
-                    // .clone();
-                // loop {
-                    // if let Some(slices) = slice_rx.recv_in(alloc.clone()) {
-                        // for _ in slices {
-                            // ts_ref_2.as_mut().push(TSlice::None)
-                        // }
-                    // }
+        // init time slices if none
+        if ct_ref2.as_mut().time_slices.is_none() {
+            let alloc = ct_ref2.meta().alloc.clone();
+            ct_ref2.as_mut().time_slices = Some(Vec::new_in(alloc))
+        }
 
-                    // debug!("something");
-                    // exception::with_intr_disabled(|| utils::wfi());
-                // }
-            // },
-        // )));
+        if let Some(slices) = ct_ref2.as_mut().time_slices.as_mut() {
+            (0..rb2.time_quota).for_each(|_| {
+                slices.push(TimeSlice::Routine)
+            });
+        } else {
+            panic!("WTF");
+        }
 
-        debug!("hhhh");
+        TS.map(|ts| ts.push((ct_ref2, 0)));
+        // create the first resource block end
 
         RESBLOCKS.map(|(rbs, _)| {
             rbs.push(rb);
-            // rbs.push(rb2);
+            rbs.push(rb2);
         });
 
         // READY_LIST.map(|l| { (0..2).for_each(|i| l.push_back(rb.time_slices[i].as_ref().unwrap().clone())) });

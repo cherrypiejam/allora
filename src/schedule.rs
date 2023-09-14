@@ -92,7 +92,7 @@ pub fn schedule() {
         });
 
         if let Some(next_ref) = next_ref {
-            crate::debug!("switch from {:p} to {:p}", curr, next_ref.0.as_ptr());
+            // crate::debug!("switch from {:p} to {:p}", curr, next_ref.0.as_ptr());
             // crate::UART.map(|u| { use core::fmt::Write; write!(u, "yield to {:#p}\n", next_ref.0.as_ptr()) });
             unsafe {
                 switch(curr as *mut _, next_ref.0.as_ptr() as *mut _)

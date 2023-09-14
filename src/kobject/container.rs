@@ -10,9 +10,9 @@ use crate::collections::list::List;
 
 #[derive(Clone)]
 pub enum TimeSlice {
-    Routine,
-    Execute(ThreadRef),
-    Redirect(KObjectRef<Container>),
+    Routine,                         // do routine, schedule something when allowed
+    Execute(ThreadRef),              // bypass routine
+    Redirect(KObjectRef<Container>), // redirect control
 }
 
 pub struct Container {

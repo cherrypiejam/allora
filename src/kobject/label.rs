@@ -5,7 +5,7 @@ use super::{KObjectRef, KObjectArena};
 use super::kobject_create;
 
 pub struct Label {
-    inner: Buckle<KObjectArena>,
+    pub inner: Buckle<KObjectArena>,
 }
 
 impl Label {
@@ -52,11 +52,8 @@ pub struct Privilege {
 impl KObjectRef<Label> {
 
     pub fn can_flow_to(&self, rhs: &Self) -> bool {
-        // crate::debug!("can flow to");
-        let a = self.as_ref()
-            .can_flow_to(rhs.as_ref());
-        // crate::debug!("can flow to");
-        a
+        self.as_ref()
+            .can_flow_to(rhs.as_ref())
     }
 
     pub fn can_flow_to_with_privilege(&self, rhs: &Self, privilege: &Privilege) -> bool {

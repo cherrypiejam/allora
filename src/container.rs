@@ -48,19 +48,72 @@ pub fn move_npages(ct_ref_1: KObjectRef<Container>, ct_ref_2: KObjectRef<Contain
 
 pub fn move_time_slices() {}
 
-pub fn search(ct_ref: KObjectRef<Container>, key: usize) -> Option<KObjectRef<Container>> {
+pub fn search(ct_ref: KObjectRef<Container>, label: &str, avoid: KObjectRef<Container>) -> Option<KObjectRef<Container>> {
     // label checks
     // ct_ref can flow to the current label
 
-    let mut cur = ct_ref;
-    // ct_ref.as_ref().known_containers.unwrap().iter().find(|ctref|)
-    // search all from root
-    // find the oldest one
+    use alloc::vec::Vec;
 
-    None
-    // 2 options after getting the target pool
-    // 1. merge to the target pool
-    // 2. let the target pool's scheduling thread to manage two pools
+    use labeled::buckle2::Buckle2;
+
+    use crate::thread::current_thread_koref;
+
+    let local_alloc = current_thread_koref().unwrap().meta().alloc.clone();
+
+    let mut containers = Vec::new();
+    let mut visited = Vec::new();
+    let mut found = Vec::new();
+
+    containers.push(ct_ref);
+
+    while let Some(ct_ref) = containers.pop() {
+
+        // label checks
+        // ct_ref can flow to the current label
+        // if not, continue
+
+        if visited.iter().find(|&&v| v == ct_ref).is_some() {
+            continue
+        } else {
+            visited.push(ct_ref)
+        }
+
+        if ct_ref != avoid
+            && ct_ref.label().unwrap().as_ref().inner
+            == Buckle2::parse_in(label, local_alloc.clone()).unwrap()
+        {
+            found.push(ct_ref)
+        }
+
+        if let Some(cts) = ct_ref.as_ref().known_containers.as_ref() {
+            cts.iter().for_each(|&ct| {
+                containers.push(ct)
+            })
+        }
+
+    }
+
+    found.pop()
+
+    // after getting the target pool, there are 2 options for us
+    // 1. merge the current pool to the target pool
+    //      + One main pool: maximize resource utilization
+    //      - Consensus & GC
+    //      a. redirect
+    //          + NO write down (no leak)
+    //          - Keeping two pools (underused resource)
+    //          - Consensus about who is the main pool is a problem,
+    //              especially when the previous main pool is deleted
+    //      b. atomic load
+    //          + One pool with RC
+    //          + No leak
+    //          - Write down,
+    //              need lang support to enforce the struct rw at a finer level
+    // 2. +let the target pool's scheduling thread to manage two pools+
+    //      + NOTE: not correct (?)
     //
     // atomic load VS redirect
+    //
+    //
+    //
 }

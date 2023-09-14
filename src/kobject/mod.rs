@@ -123,6 +123,16 @@ pub struct KObjectRef<T> {
     _type: PhantomData<T>
 }
 
+impl<T> core::fmt::Debug for KObjectRef<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        use alloc::format;
+        f.debug_struct(&format!("KObjectRef<{}>", core::any::type_name::<T>()))
+            .field("id", &self.id)
+            .finish()
+
+    }
+}
+
 impl<T> PartialEq for KObjectRef<T> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
