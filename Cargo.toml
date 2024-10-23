@@ -5,9 +5,9 @@ authors = ["Amit Aryeh Levy <amit@amitlevy.com>"]
 edition = "2018"
 
 [dependencies]
-linked_list_allocator = "0.8.11"
+linked_list_allocator = "0.9.0"
 labeled = { git = "https://github.com/cherrypiejam/labeled", features = ["buckle2"] }
-heapless = "0.7.16"
+heapless = "0.8.0"
 
 [profile.release]
 debug = true
